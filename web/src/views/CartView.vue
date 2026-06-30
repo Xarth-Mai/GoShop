@@ -1,16 +1,38 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useCartStore } from '../stores/cart'
+import { useAuthStore } from '../stores/auth'
 import Card from '../components/ui/Card.vue'
 import Button from '../components/ui/Button.vue'
 
 const router = useRouter()
 const cartStore = useCartStore()
+const authStore = useAuthStore()
 
 const items = computed(() => cartStore.items)
-const totalPrice = computed(() => cartStore.totalPrice)
-const totalItems = computed(() => cartStore.totalItems)
+const selectedSkuIDs = computed({
+  get: () => cartStore.selectedSkuIDs,
+  set: (val) => { cartStore.selectedSkuIDs = val }
+})
+
+const selectedItemsCount = computed(() => {
+  return cartStore.selectedItems.reduce((acc, item) => acc + item.quantity, 0)
+})
+
+const selectedTotalPrice = computed(() => cartStore.selectedTotalPrice)
+
+// Checkbox select all/none computed helper
+const isAllSelected = computed({
+  get: () => items.value.length > 0 && selectedSkuIDs.value.length === items.value.length,
+  set: (val) => {
+    if (val) {
+      cartStore.selectedSkuIDs = items.value.map(i => i.skuId)
+    } else {
+      cartStore.selectedSkuIDs = []
+    }
+  }
+})
 
 const updateQuantity = (skuId: number, qty: number) => {
   cartStore.updateQuantity(skuId, qty)
@@ -21,8 +43,18 @@ const removeItem = (skuId: number) => {
 }
 
 const handleCheckout = () => {
+  if (cartStore.selectedItems.length === 0) {
+    alert('请选择至少一件商品进行结算')
+    return
+  }
   router.push('/checkout')
 }
+
+onMounted(() => {
+  if (authStore.isLoggedIn) {
+    cartStore.fetchCloudCart()
+  }
+})
 </script>
 
 <template>
@@ -42,8 +74,17 @@ const handleCheckout = () => {
     <div v-else class="cart-grid">
       <!-- Cart Items List -->
       <div class="cart-items-section">
+        <!-- Select All Control -->
+        <div class="select-all-bar">
+          <label class="checkbox-label">
+            <input type="checkbox" v-model="isAllSelected" class="select-all-checkbox" />
+            <span class="select-all-text">全选 ({{ selectedSkuIDs.length }}/{{ items.length }})</span>
+          </label>
+        </div>
+
         <Card variant="cream" class="cart-item-card" v-for="item in items" :key="item.skuId">
           <div class="item-layout">
+            <input type="checkbox" :value="item.skuId" v-model="selectedSkuIDs" class="item-checkbox" />
             <img :src="item.image" :alt="item.spuName" class="item-img" />
             <div class="item-details">
               <h3 class="item-title" @click="router.push(`/product/${item.spuId}`)">{{ item.spuName }}</h3>
@@ -68,18 +109,18 @@ const handleCheckout = () => {
           <h3 class="summary-title">订单摘要</h3>
           <div class="summary-row">
             <span>选购商品数</span>
-            <span>{{ totalItems }} 件</span>
+            <span>{{ selectedItemsCount }} 件</span>
           </div>
           <div class="summary-row">
             <span>运费</span>
-            <span>包邮</span>
+            <span>满¥99包邮</span>
           </div>
           <div class="summary-total-row">
             <span>应付总额</span>
-            <span class="total-price">¥{{ (totalPrice / 100).toFixed(2) }}</span>
+            <span class="total-price">¥{{ (selectedTotalPrice / 100).toFixed(2) }}</span>
           </div>
-          <Button @click="handleCheckout" variant="primary" class="checkout-btn">
-            去结算
+          <Button @click="handleCheckout" variant="primary" class="checkout-btn" :disabled="selectedItemsCount === 0">
+            去结算 ({{ selectedItemsCount }})
           </Button>
         </Card>
       </div>
@@ -123,6 +164,35 @@ const handleCheckout = () => {
   .cart-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.select-all-bar {
+  background-color: var(--colors-surface-card);
+  padding: 10px 16px;
+  border-radius: var(--rounded-md);
+  border: 1px solid var(--colors-hairline-soft);
+  display: flex;
+  align-items: center;
+  margin-bottom: var(--spacing-xs);
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--colors-ink);
+}
+
+.select-all-checkbox, .item-checkbox {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid var(--colors-hairline);
+  accent-color: var(--colors-primary);
+  cursor: pointer;
 }
 
 .cart-items-section {

@@ -74,6 +74,22 @@ onMounted(() => {
 const handleViewProduct = (id: number) => {
   router.push(`/product/${id}`)
 }
+
+const preloadProduct = async (id: number) => {
+  if (!(window as any).productCache) {
+    (window as any).productCache = {}
+  }
+  if (!(window as any).productCache[id]) {
+    try {
+      const res = await fetch(`/api/products/${id}`)
+      if (res.ok) {
+        (window as any).productCache[id] = await res.json()
+      }
+    } catch (err) {
+      // Ignore silence
+    }
+  }
+}
 </script>
 
 <template>
@@ -129,8 +145,16 @@ const handleViewProduct = (id: number) => {
 
     <!-- Product Grid -->
     <section class="products-section">
-      <div v-if="loading" class="loading-state">
-        正在拉取商品列表...
+      <div v-if="loading" class="products-grid">
+        <!-- Flashing Skeleton Cards -->
+        <div v-for="n in 3" :key="n" class="skeleton-card">
+          <div class="skeleton-img-wrapper skeleton-glow"></div>
+          <div class="skeleton-info">
+            <div class="skeleton-title skeleton-glow"></div>
+            <div class="skeleton-text skeleton-glow"></div>
+            <div class="skeleton-footer skeleton-glow"></div>
+          </div>
+        </div>
       </div>
       <div v-else class="products-grid">
         <Card
@@ -140,6 +164,7 @@ const handleViewProduct = (id: number) => {
           :hoverable="true"
           class="product-item"
           @click="handleViewProduct(product.id)"
+          @mouseenter="preloadProduct(product.id)"
         >
           <div class="product-image-wrapper">
             <img :src="product.mainImage" :alt="product.name" class="product-image" />
@@ -154,7 +179,6 @@ const handleViewProduct = (id: number) => {
             <p class="product-subtitle">{{ product.subtitle }}</p>
             <div class="product-footer">
               <span class="product-price">
-                <!-- If SPU is 1 (Claude Phone), the price is determined by the lowest SKU price or SPU default -->
                 ¥{{ (product.price ? product.price / 100 : 399.00).toFixed(2) }} 起
               </span>
               <span class="view-detail-btn">
@@ -173,6 +197,69 @@ const handleViewProduct = (id: number) => {
 </template>
 
 <style scoped>
+/* Skeleton Loader Styles */
+.skeleton-card {
+  background-color: var(--colors-surface-card);
+  border-radius: var(--rounded-lg);
+  border: 1px solid var(--colors-hairline-soft);
+  padding: var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.skeleton-img-wrapper {
+  width: 100%;
+  aspect-ratio: 4/3;
+  border-radius: var(--rounded-md);
+}
+
+.skeleton-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  flex-grow: 1;
+}
+
+.skeleton-title {
+  width: 60%;
+  height: 24px;
+  border-radius: 4px;
+}
+
+.skeleton-text {
+  width: 90%;
+  height: 48px;
+  border-radius: 4px;
+}
+
+.skeleton-footer {
+  width: 100%;
+  height: 36px;
+  border-radius: 4px;
+  margin-top: auto;
+}
+
+.skeleton-glow {
+  background: linear-gradient(
+    90deg,
+    var(--colors-surface-soft) 25%,
+    var(--colors-hairline-soft) 37%,
+    var(--colors-surface-soft) 63%
+  );
+  background-size: 400% 100%;
+  animation: skeleton-loading 1.4s ease infinite;
+}
+
+@keyframes skeleton-loading {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
 .home-container {
   max-width: 1200px;
   margin: 0 auto;

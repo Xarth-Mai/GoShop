@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"GoShop/config"
+	"GoShop/models"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -21,6 +22,24 @@ func InitDB() error {
 
 	// 初始化主库
 	DB, err = gorm.Open(postgres.Open(cfg.Master), &gorm.Config{})
+	if err != nil {
+		return err
+	}
+
+	// 数据库自动迁移
+	err = DB.AutoMigrate(
+		&models.User{},
+		&models.Category{},
+		&models.Spu{},
+		&models.Sku{},
+		&models.Order{},
+		&models.OrderItem{},
+		&models.Address{},
+		&models.Coupon{},
+		&models.UserCoupon{},
+		&models.CartItem{},
+		&models.DeadLetterOrder{},
+	)
 	if err != nil {
 		return err
 	}

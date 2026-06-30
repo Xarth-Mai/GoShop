@@ -6,6 +6,7 @@ import { useAuthStore } from '../stores/auth'
 import Card from '../components/ui/Card.vue'
 import Button from '../components/ui/Button.vue'
 import Badge from '../components/ui/Badge.vue'
+import { signedFetch } from '../api/request'
 
 interface Sku {
   id: number
@@ -46,20 +47,33 @@ const loading = ref(false)
 const message = ref('')
 const messageType = ref<'success' | 'error' | ''>('')
 
+// Coupons state
+const coupons = ref<any[]>([])
+const claimedCouponIDs = ref<number[]>([])
+
 // Seckill-specific state
 const backendStock = ref<number | null>(null)
 const isSeckilling = ref(false)
 
 const getProduct = async () => {
+  const cached = (window as any).productCache?.[props.id]
+  if (cached) {
+    product.value = cached
+    selectedSku.value = cached.skus?.[0] || null
+    if (product.value?.id === 1) {
+      fetchStock()
+    }
+    return
+  }
+
   loading.value = true
   try {
-    const res = await fetch(`/api/products/${props.id}`)
+    const res = await signedFetch(`/api/products/${props.id}`)
     if (res.ok) {
       const data = await res.json()
       product.value = data
       selectedSku.value = data.skus?.[0] || null
       
-      // If it is Claude Phone 1 (SPU 1), start fetching Valkey stock
       if (product.value?.id === 1) {
         fetchStock()
       }
@@ -73,12 +87,67 @@ const getProduct = async () => {
 
 const fetchCategories = async () => {
   try {
-    const res = await fetch('/api/categories')
+    const res = await signedFetch('/api/categories')
     if (res.ok) {
       categories.value = await res.json()
     }
   } catch (err) {
     console.error('获取分类失败:', err)
+  }
+}
+
+const fetchCoupons = async () => {
+  try {
+    const res = await signedFetch('/api/coupons')
+    if (res.ok) {
+      coupons.value = await res.json()
+    }
+  } catch (err) {
+    console.error('获取优惠券失败:', err)
+  }
+}
+
+const fetchUserCoupons = async () => {
+  if (!authStore.isLoggedIn) return
+  try {
+    const res = await signedFetch('/api/user-coupons')
+    if (res.ok) {
+      const data = await res.json()
+      claimedCouponIDs.value = data.map((uc: any) => uc.couponId)
+    }
+  } catch (err) {
+    console.error('获取已领卡券失败:', err)
+  }
+}
+
+const isClaimed = (couponId: number) => {
+  return claimedCouponIDs.value.includes(couponId)
+}
+
+const claimCoupon = async (couponId: number) => {
+  if (!authStore.isLoggedIn) {
+    router.push({ name: 'Login', query: { redirect: router.currentRoute.value.fullPath } })
+    return
+  }
+  if (isClaimed(couponId)) {
+    showMessage('您已经领取过此优惠券！', 'success')
+    return
+  }
+
+  try {
+    const res = await signedFetch('/api/user-coupons/receive', {
+      method: 'POST',
+      body: JSON.stringify({ couponId })
+    })
+    const data = await res.json()
+    if (res.ok) {
+      showMessage('优惠券领取成功！已存入您的卡券包', 'success')
+      claimedCouponIDs.value.push(couponId)
+    } else {
+      showMessage(data.message || '优惠券领取失败', 'error')
+    }
+  } catch (err) {
+    showMessage('领取请求异常，请检查服务状态', 'error')
   }
 }
 
@@ -101,15 +170,13 @@ const showMessage = (msg: string, type: 'success' | 'error') => {
   }, 4000)
 }
 
-// Fetch metrics (to sync stock for Claude Phone 1)
 const fetchStock = async () => {
   if (product.value?.id !== 1) return
   try {
-    const res = await fetch('/api/metrics')
+    const res = await signedFetch('/api/metrics')
     if (res.ok) {
       const data = await res.json()
       backendStock.value = data.metrics.seckillStock
-      // Update SKU 1 stock reactively
       const sku1 = product.value.skus.find(s => s.id === 1)
       if (sku1) sku1.stock = data.metrics.seckillStock
     }
@@ -121,8 +188,9 @@ const fetchStock = async () => {
 onMounted(() => {
   fetchCategories()
   getProduct()
+  fetchCoupons()
+  fetchUserCoupons()
   
-  // If it is the seckill product, poll stock
   const idNum = parseInt(props.id)
   if (idNum === 1) {
     const timer = setInterval(fetchStock, 3000)
@@ -130,9 +198,11 @@ onMounted(() => {
   }
 })
 
-const handleAddToCart = () => {
+// Cloud synced cart add function
+const handleAddToCart = async () => {
   if (!product.value || !selectedSku.value) return
   
+  // Local Pinia update
   cartStore.addToCart({
     skuId: selectedSku.value.id,
     spuId: product.value.id,
@@ -142,10 +212,24 @@ const handleAddToCart = () => {
     image: product.value.mainImage
   }, quantity.value)
 
-  showMessage('商品已成功加入购物车！', 'success')
+  // Cloud database sync
+  if (authStore.isLoggedIn) {
+    try {
+      await signedFetch('/api/cart', {
+        method: 'POST',
+        body: JSON.stringify({
+          skuId: selectedSku.value.id,
+          quantity: quantity.value
+        })
+      })
+    } catch (e) {
+      console.warn('云端购物车同步失败，暂存本地: ', e)
+    }
+  }
+
+  showMessage('商品已成功加入云端购物车！', 'success')
 }
 
-// Seckill purchase workflow (directly triggers backend seckill api)
 const handleSeckillPurchase = async () => {
   if (!authStore.isLoggedIn) {
     router.push({ name: 'Login', query: { redirect: router.currentRoute.value.fullPath } })
@@ -154,7 +238,7 @@ const handleSeckillPurchase = async () => {
 
   isSeckilling.value = true
   try {
-    const res = await fetch('/api/seckill', {
+    const res = await signedFetch('/api/seckill', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -162,8 +246,7 @@ const handleSeckillPurchase = async () => {
     })
     const data = await res.json()
     if (res.ok && data.status === 'success') {
-      showMessage('抢购成功！订单已创建，请在 15 秒内完成支付。', 'success')
-      // Redirect to Order Page after a short delay so they can pay
+      showMessage('抢购成功！秒杀订单已创建，请在 15 秒内完成支付。', 'success')
       setTimeout(() => {
         router.push('/orders')
       }, 1500)
@@ -182,8 +265,9 @@ const handleStandardPurchase = () => {
     router.push({ name: 'Login', query: { redirect: router.currentRoute.value.fullPath } })
     return
   }
-  // Clear cart and buy single item
   if (!product.value || !selectedSku.value) return
+
+  // Sync to local cart store and redirect
   cartStore.clearCart()
   cartStore.addToCart({
     skuId: selectedSku.value.id,
@@ -221,6 +305,22 @@ const handleStandardPurchase = () => {
         <div class="price-box">
           <span class="price-label">售价</span>
           <span class="price-value">¥{{ ((selectedSku?.price || product.price) / 100).toFixed(2) }}</span>
+        </div>
+
+        <!-- Coupons Claim Section -->
+        <div class="coupons-section" v-if="coupons.length > 0">
+          <span class="coupons-label">专享卡券：</span>
+          <div class="coupons-list">
+            <span
+              v-for="cp in coupons"
+              :key="cp.id"
+              :class="['coupon-badge-item', { claimed: isClaimed(cp.id) }]"
+              @click="claimCoupon(cp.id)"
+            >
+              {{ cp.name }}
+              <span class="badge-status">{{ isClaimed(cp.id) ? '已领' : '领券' }}</span>
+            </span>
+          </div>
         </div>
 
         <div class="product-desc-box">
@@ -394,6 +494,70 @@ const handleStandardPurchase = () => {
   font-size: 24px;
   font-weight: 700;
   color: var(--colors-primary);
+}
+
+/* Coupons claim styles */
+.coupons-section {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) 0;
+  border-bottom: 1px dashed var(--colors-hairline-soft);
+}
+
+.coupons-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--colors-muted);
+  min-width: 60px;
+}
+
+.coupons-list {
+  display: flex;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+}
+
+.coupon-badge-item {
+  background-color: rgba(242, 100, 25, 0.08);
+  border: 1px dashed var(--colors-primary);
+  color: var(--colors-primary);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.coupon-badge-item:hover:not(.claimed) {
+  background-color: var(--colors-primary);
+  color: var(--colors-on-dark);
+  transform: translateY(-1px);
+}
+
+.coupon-badge-item.claimed {
+  background-color: var(--colors-surface-soft);
+  border-color: var(--colors-hairline);
+  color: var(--colors-muted);
+  cursor: not-allowed;
+}
+
+.badge-status {
+  background-color: var(--colors-primary);
+  color: var(--colors-on-dark);
+  font-size: 9px;
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-weight: 600;
+}
+
+.coupon-badge-item.claimed .badge-status {
+  background-color: var(--colors-hairline);
+  color: var(--colors-muted);
 }
 
 .product-desc-box {
