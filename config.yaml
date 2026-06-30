@@ -1,0 +1,21 @@
+server:
+  port: 3233
+  mode: "debug"
+
+database:
+  master: "host=127.0.0.1 port=5432 user=postgres password=postgres dbname=goshop sslmode=disable TimeZone=Asia/Shanghai"
+  replica: "host=127.0.0.1 port=5432 user=postgres password=postgres dbname=goshop sslmode=disable TimeZone=Asia/Shanghai"
+  max_idle_conns: 10
+  max_open_conns: 100
+  conn_max_lifetime: 3600 # 连接最大生命周期（秒）
+
+redis:
+  addr: "127.0.0.1:6379"
+  password: ""
+  db: 0
+  pool_size: 20
+
+jwt:
+  secret: "your_goshop_jwt_secret_key_change_me"
+  expire: 7200 # Access Token 2小时
+  refresh_expire: 604800 # Refresh Token 7天
