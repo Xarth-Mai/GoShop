@@ -91,15 +91,28 @@ cp config.example.yaml config.yaml
 
 ### 4. 运行服务
 
-无需复杂的构建脚本，直接拉取依赖并启动即可：
+由于本项目已实现**单端口统一托管模式**，启动服务前需要先将前端项目编译打包至 `web/dist`（Gin 会自动静态托管该目录）：
 
-```bash
-go mod tidy
-go run main.go
+1. **构建前端静态资源**（请确保已安装 `bun`，或使用 `npm`/`yarn` 代替）：
 
-```
+   ```bash
+   cd web
+   bun install
+   bun run build
+   cd ..
+   ```
 
-启动成功后，终端将输出：`[GIN-debug] Listening and serving HTTP on :3233`
+2. **启动 Go 后端服务**：
+
+   ```bash
+   go mod tidy
+   go run main.go
+   ```
+
+启动成功后，终端将输出：`GoShop 服务已启动，监听端口 :3233 ...`。
+
+直接打开浏览器访问以下地址，即可同时访问完整的 API 与前端控制台：
+👉 **[http://localhost:3233](https://shop.lzzz.ink)**
 
 ---
 
