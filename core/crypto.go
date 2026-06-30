@@ -74,7 +74,7 @@ func ParseAndVerifyToken(tokenStr string, expectedType string) (*TokenPayload, e
 	h.Write([]byte(payloadBase64))
 	serverSignature := hex.EncodeToString(h.Sum(nil))
 
-	if clientSignature != serverSignature {
+	if !hmac.Equal([]byte(clientSignature), []byte(serverSignature)) {
 		return nil, errors.New("invalid token signature")
 	}
 

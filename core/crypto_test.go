@@ -9,8 +9,8 @@ func TestTokenLifecycle(t *testing.T) {
 	userID := uint(99)
 	username := "test_runner"
 
-	// 1. 生成 Access Token (2 秒有效期)
-	token, err := GenerateToken(userID, username, 2*time.Second, "access")
+	// 1. 生成 Access Token
+	token, err := GenerateToken(userID, username, time.Minute, "access")
 	if err != nil {
 		t.Fatalf("Failed to generate token: %v", err)
 	}
@@ -32,9 +32,12 @@ func TestTokenLifecycle(t *testing.T) {
 		t.Error("Expected failure when parsing access token as refresh token, but got success")
 	}
 
-	// 4. 等待 3 秒直到 Token 过期并校验
-	time.Sleep(3 * time.Second)
-	_, err = ParseAndVerifyToken(token, "access")
+	// 4. 使用已过期 Token 校验过期逻辑，避免测试依赖真实等待
+	expiredToken, err := GenerateToken(userID, username, -time.Second, "access")
+	if err != nil {
+		t.Fatalf("Failed to generate expired token: %v", err)
+	}
+	_, err = ParseAndVerifyToken(expiredToken, "access")
 	if err == nil || err.Error() != "token has expired" {
 		t.Errorf("Expected token expiration error, got: %v", err)
 	}
