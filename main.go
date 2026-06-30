@@ -198,7 +198,17 @@ func main() {
 	r.StaticFile("/", "./web/dist/index.html")
 
 	// 5.1 Swagger API 文档
-	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	r.GET("/swagger", func(c *gin.Context) {
+		c.Redirect(http.StatusMovedPermanently, "/swagger/index.html")
+	})
+	r.GET("/swagger/*any", func(c *gin.Context) {
+		path := c.Param("any")
+		if path == "" || path == "/" {
+			c.Redirect(http.StatusMovedPermanently, "/swagger/index.html")
+			return
+		}
+		ginSwagger.WrapHandler(swaggerFiles.Handler)(c)
+	})
 
 	// SPA Routing Fallback
 	r.NoRoute(func(c *gin.Context) {
