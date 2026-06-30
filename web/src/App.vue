@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 
 // 菜单活动状态
 const activeTab = ref('dashboard')
@@ -12,38 +12,81 @@ const metrics = ref({
   revenue: '38,290.00' // 今日销售额
 })
 
-// 模拟日志输出
-const logs = ref([
-  { time: '13:28:10', type: 'INFO', msg: 'Valkey Lua pre-decrement stock SUCCESS. SKU_ID: 1002, Stock left: 89' },
-  { time: '13:28:15', type: 'INFO', msg: 'Order created. ID: GS-2026-8910. Pushing check-delay task to ZSet' },
-  { time: '13:28:22', type: 'WARN', msg: 'Stock threshold warning. SKU_ID: 1002, stock below 10%' },
-  { time: '13:28:30', type: 'INFO', msg: 'Delay queue consumer checking Order: GS-2026-8910. Status: PAID. Close task.' }
-])
+// 日志数据结构
+interface LogItem {
+  time: string
+  type: string
+  msg: string
+}
+const logs = ref<LogItem[]>([])
 
 const activeLog = ref('')
 
-const handleTestDecrement = () => {
-  if (metrics.value.seckillStock > 0) {
-    metrics.value.seckillStock -= 1
-    metrics.value.ordersPaid += 1
-    metrics.value.revenue = (parseFloat(metrics.value.revenue.replace(/,/g, '')) + 249.00).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    
-    const now = new Date()
-    const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`
-    
-    logs.value.unshift({
-      time: timeStr,
-      type: 'SUCCESS',
-      msg: `[User Simulate] Seckill purchase success. Stock: ${metrics.value.seckillStock} | Total Paid: ${metrics.value.ordersPaid}`
-    })
-    
-    if (logs.value.length > 6) {
-      logs.value.pop()
+// 获取后端指标与日志
+const fetchMetrics = async () => {
+  try {
+    const res = await fetch('/api/metrics')
+    if (res.ok) {
+      const data = await res.json()
+      metrics.value = data.metrics
+      if (data.logs) {
+        logs.value = data.logs
+      }
     }
-  } else {
-    activeLog.value = 'Out of Stock!'
+  } catch (err) {
+    console.error('获取指标失败:', err)
   }
 }
+
+// 模拟秒杀下单
+const handleTestDecrement = async () => {
+  try {
+    const res = await fetch('/api/seckill', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    })
+    const data = await res.json()
+    if (res.ok) {
+      // 成功后立即拉取一次最新状态
+      await fetchMetrics()
+    } else {
+      activeLog.value = data.message || '秒杀失败'
+      setTimeout(() => {
+        activeLog.value = ''
+      }, 3000)
+    }
+  } catch (err) {
+    console.error('秒杀接口请求失败:', err)
+  }
+}
+
+// 重置库存
+const handleReset = async () => {
+  try {
+    const res = await fetch('/api/reset', {
+      method: 'POST'
+    })
+    if (res.ok) {
+      await fetchMetrics()
+    }
+  } catch (err) {
+    console.error('重置库存失败:', err)
+  }
+}
+
+let timer: any = null
+onMounted(() => {
+  fetchMetrics()
+  timer = setInterval(fetchMetrics, 1500)
+})
+
+onUnmounted(() => {
+  if (timer) {
+    clearInterval(timer)
+  }
+})
 </script>
 
 <template>
@@ -62,7 +105,7 @@ const handleTestDecrement = () => {
           <span class="status-indicator"></span>
           Operator: Admin
         </span>
-        <button class="btn-primary signout-btn" @click="metrics.seckillStock = 87">
+        <button class="btn-primary signout-btn" @click="handleReset">
           重置库存
         </button>
       </div>
