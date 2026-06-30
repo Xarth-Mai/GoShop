@@ -7,8 +7,6 @@
 *.dll
 *.so
 *.dylib
-goshop
-GoShop
 
 # Test binary, built with `go test -c`
 *.test
@@ -32,3 +30,8 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Project
+config.yaml
+goshop
+GoShop
