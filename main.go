@@ -19,28 +19,32 @@ import (
 )
 
 type Order struct {
-	ID          string    `gorm:"primaryKey;column:id"`
-	UserID      int       `gorm:"column:user_id"`
-	TotalAmount int       `gorm:"column:total_amount"`
-	Status      int       `gorm:"column:status"` // 1: 待支付, 2: 已支付, 3: 已取消
-	CreatedAt   time.Time `gorm:"column:created_at"`
-	UpdatedAt   time.Time `gorm:"column:updated_at"`
+	ID          string    `gorm:"primaryKey;column:id" json:"id"`
+	UserID      int       `gorm:"column:user_id" json:"userId"`
+	TotalAmount int       `gorm:"column:total_amount" json:"totalAmount"`
+	Status      int       `gorm:"column:status" json:"status"` // 1: 待支付, 2: 已支付, 3: 已取消
+	CreatedAt   time.Time `gorm:"column:created_at" json:"createdAt"`
+	UpdatedAt   time.Time `gorm:"column:updated_at" json:"updatedAt"`
 }
 
 type OrderItem struct {
-	ID        int       `gorm:"primaryKey;column:id;autoIncrement"`
-	OrderID   string    `gorm:"column:order_id"`
-	SkuID     int       `gorm:"column:sku_id"`
-	Price     int       `gorm:"column:price"`
-	Quantity  int       `gorm:"column:quantity"`
-	CreatedAt time.Time `gorm:"column:created_at"`
-	UpdatedAt time.Time `gorm:"column:updated_at"`
+	ID        int       `gorm:"primaryKey;column:id;autoIncrement" json:"id"`
+	OrderID   string    `gorm:"column:order_id" json:"orderId"`
+	SkuID     int       `gorm:"column:sku_id" json:"skuId"`
+	Price     int       `gorm:"column:price" json:"price"`
+	Quantity  int       `gorm:"column:quantity" json:"quantity"`
+	CreatedAt time.Time `gorm:"column:created_at" json:"createdAt"`
+	UpdatedAt time.Time `gorm:"column:updated_at" json:"updatedAt"`
 }
 
 type LogItem struct {
 	Time string `json:"time"`
 	Type string `json:"type"`
 	Msg  string `json:"msg"`
+}
+
+type PayRequest struct {
+	OrderID string `json:"orderId" binding:"required"`
 }
 
 const seckillLua = `
@@ -88,6 +92,55 @@ func formatCurrency(val float64) string {
 	return strings.Join(result, "") + "." + fraction
 }
 
+func startDelayQueueWorker() {
+	ticker := time.NewTicker(1 * time.Second)
+	ctx := context.Background()
+	log.Println("[INFO] 延迟队列 Worker 已启动...")
+
+	for range ticker.C {
+		if core.RedisClient == nil || core.DB == nil {
+			continue
+		}
+
+		now := time.Now().Unix()
+		// 获取超时的订单号 (Score <= now)
+		orders, err := core.RedisClient.ZRangeByScore(ctx, "seckill:delay_queue", &redis.ZRangeBy{
+			Min: "-inf",
+			Max: fmt.Sprintf("%d", now),
+		}).Result()
+
+		if err != nil || len(orders) == 0 {
+			continue
+		}
+
+		for _, orderID := range orders {
+			// 使用事务在数据库中取消待支付订单
+			tx := core.DB.Begin()
+			var order Order
+			if err := tx.First(&order, "id = ?", orderID).Error; err == nil {
+				if order.Status == 1 { // 只有处于待支付状态才回收库存并取消订单
+					if err := tx.Model(&order).Update("status", 3).Error; err == nil {
+						tx.Commit()
+
+						// 回退 Redis 中的缓存库存 (增加 1)
+						core.RedisClient.IncrBy(ctx, "seckill:stock:1", 1)
+						pushLog(ctx, "WARN", fmt.Sprintf("Delay worker: Order %s EXPIRED. Cancelled and rolled back stock.", orderID))
+					} else {
+						tx.Rollback()
+					}
+				} else {
+					tx.Commit()
+				}
+			} else {
+				tx.Rollback()
+			}
+
+			// 从 ZSet 延迟队列中移除任务
+			core.RedisClient.ZRem(ctx, "seckill:delay_queue", orderID)
+		}
+	}
+}
+
 func main() {
 	// 1. 初始化配置
 	configPath := "config.yaml"
@@ -128,9 +181,13 @@ func main() {
 	// 4. 初始化 Gin 引擎
 	r := gin.Default()
 
+	// 启动延迟队列后台 Worker
+	go startDelayQueueWorker()
+
 	// 5. 静态资源托管
 	r.Static("/assets", "./web/dist/assets")
 	r.StaticFile("/favicon.ico", "./web/dist/favicon.ico")
+	r.StaticFile("/phone.png", "./web/dist/phone.png")
 	r.StaticFile("/", "./web/dist/index.html")
 
 	// 6. 注册基础路由与健康检查
@@ -198,6 +255,12 @@ func main() {
 			}
 		}
 
+		// 5. 获取待支付订单列表 (status = 1)
+		var pendingOrders []Order
+		if core.DB != nil {
+			core.DB.Where("status = ?", 1).Order("created_at desc").Find(&pendingOrders)
+		}
+
 		c.JSON(http.StatusOK, gin.H{
 			"metrics": gin.H{
 				"seckillStock": stock,
@@ -205,7 +268,8 @@ func main() {
 				"ordersPaid":   ordersPaid,
 				"revenue":      revenueStr,
 			},
-			"logs": logs,
+			"logs":          logs,
+			"pendingOrders": pendingOrders,
 		})
 	})
 
@@ -266,34 +330,64 @@ func main() {
 			}
 		}
 
-		// 4. 加入延迟队列
+		// 4. 加入延迟队列 (15秒后超时，为演示起见，方便查看)
 		now := time.Now().Unix()
 		core.RedisClient.ZAdd(ctx, "seckill:delay_queue", redis.Z{
 			Score:  float64(now + 15),
 			Member: orderID,
 		})
 
-		pushLog(ctx, "INFO", fmt.Sprintf("Valkey Lua pre-decrement SUCCESS. Stock left: %s. Order created: %s, pushed to delay queue.", leftStock, orderID))
-
-		// 5. 模拟 3 秒后支付成功
-		go func(oid string) {
-			time.Sleep(3 * time.Second)
-			if core.DB != nil {
-				var order Order
-				if err := core.DB.First(&order, "id = ?", oid).Error; err == nil {
-					if order.Status == 1 {
-						core.DB.Model(&order).Update("status", 2)
-						core.RedisClient.ZRem(context.Background(), "seckill:delay_queue", oid)
-						pushLog(context.Background(), "SUCCESS", fmt.Sprintf("Order: %s PAID. Moved to metrics. Saved to DB.", oid))
-					}
-				}
-			}
-		}(orderID)
+		pushLog(ctx, "INFO", fmt.Sprintf("Valkey Lua pre-decrement SUCCESS. Stock left: %s. Order %s created. Please pay in 15 seconds.", leftStock, orderID))
 
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "success",
 			"orderId": orderID,
 		})
+	})
+
+	// 模拟订单支付
+	r.POST("/api/pay", func(c *gin.Context) {
+		var req PayRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "参数错误"})
+			return
+		}
+
+		ctx := context.Background()
+		if core.DB == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "数据库未就绪"})
+			return
+		}
+
+		tx := core.DB.Begin()
+		var order Order
+		if err := tx.First(&order, "id = ?", req.OrderID).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusNotFound, gin.H{"message": "订单未找到"})
+			return
+		}
+
+		if order.Status != 1 {
+			tx.Rollback()
+			c.JSON(http.StatusBadRequest, gin.H{"message": "订单状态不正确，无法支付"})
+			return
+		}
+
+		// 更新订单状态为已支付 (2)
+		if err := tx.Model(&order).Update("status", 2).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "更新订单失败"})
+			return
+		}
+
+		tx.Commit()
+
+		// 立刻从延迟队列中移除任务
+		core.RedisClient.ZRem(ctx, "seckill:delay_queue", req.OrderID)
+
+		pushLog(ctx, "SUCCESS", fmt.Sprintf("Order: %s PAID. Saved to DB.", req.OrderID))
+
+		c.JSON(http.StatusOK, gin.H{"status": "paid"})
 	})
 
 	// 重置库存与清空数据
