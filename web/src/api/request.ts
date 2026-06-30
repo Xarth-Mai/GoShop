@@ -74,6 +74,10 @@ export async function signedFetch(path: string, options: RequestInit = {}): Prom
     headers.set('Authorization', `Bearer ${authStore.token}`)
   }
 
+  if (options.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+
   // 2. Sign and Nonce Headers for POST, PUT, DELETE write operations
   if (method === 'POST' || method === 'PUT' || method === 'DELETE') {
     const timestamp = Date.now().toString()

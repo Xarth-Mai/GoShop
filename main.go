@@ -329,11 +329,11 @@ func main() {
 		core.RedisClient.Del(ctx, "seckill:delay_queue:processing")
 		core.RedisClient.Del(ctx, "seckill:logs")
 
-		// 删除测试生成的订单 (GS- 开头)
+		// 删除测试生成的普通与秒杀演示订单
 		if core.DB != nil {
-			core.DB.Where("order_id LIKE ?", "GS-%").Delete(&models.OrderItem{})
-			core.DB.Where("id LIKE ?", "GS-%").Delete(&models.Order{})
-			core.DB.Where("order_id LIKE ?", "GS-%").Delete(&models.DeadLetterOrder{})
+			core.DB.Where("order_id LIKE ? OR order_id LIKE ?", "GS-%", "SK-%").Delete(&models.OrderItem{})
+			core.DB.Where("id LIKE ? OR id LIKE ?", "GS-%", "SK-%").Delete(&models.Order{})
+			core.DB.Where("order_id LIKE ? OR order_id LIKE ?", "GS-%", "SK-%").Delete(&models.DeadLetterOrder{})
 			// 恢复所有的卡券和购物车
 			core.DB.Exec("UPDATE user_coupons SET status = 0, used_at = NULL")
 		}

@@ -242,6 +242,13 @@ func CreateOrder(c *gin.Context) {
 
 // PayOrder 支付订单接口
 func PayOrder(c *gin.Context) {
+	userIDVal, exists := c.Get("userId")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "未登录"})
+		return
+	}
+	userID := userIDVal.(uint)
+
 	var req PayReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "参数错误"})
@@ -255,7 +262,7 @@ func PayOrder(c *gin.Context) {
 
 	tx := core.DB.Begin()
 	var order models.Order
-	if err := tx.First(&order, "id = ?", req.OrderID).Error; err != nil {
+	if err := tx.First(&order, "id = ? AND user_id = ?", req.OrderID, userID).Error; err != nil {
 		tx.Rollback()
 		c.JSON(http.StatusNotFound, gin.H{"message": "订单不存在"})
 		return
@@ -487,7 +494,7 @@ func StartReliableDelayQueueWorker() {
 			// 2. 原子性抢占任务：从原有 ZSet 中移出，并打入 processing ZSet，设置 Score 为过期时间戳 (当前时间+30s)
 			// 利用 ZRem 返回值确认是否由当前 Worker 抢占成功，防止并发处理
 			removed, _ := core.RedisClient.ZRem(ctx, "seckill:delay_queue", orderID).Result()
-			
+
 			// 如果已经在 processing 里，可能是在进行重试，我们也支持将其再次抢占
 			isStaleRetry := false
 			if removed == 0 {
@@ -652,25 +659,25 @@ func Seckill(c *gin.Context) {
 	leftStock, _ := core.RedisClient.Get(ctx, "seckill:stock:1").Result()
 
 	// 3. 生成订单并写入数据库 (status=1, 待支付)
-	orderID := fmt.Sprintf("GS-%d-%d", time.Now().Unix(), time.Now().Nanosecond()%1000)
+	orderID := fmt.Sprintf("SK-%d-%d", time.Now().Unix(), time.Now().Nanosecond()%1000)
 
 	if core.DB != nil {
 		// 秒杀订单价格固定为 399.00元 (39900分)
 		order := models.Order{
-			ID:          orderID,
-			UserID:      userID,
-			TotalAmount: 39900,
-			Status:      1,
-			ReceiverName: "秒杀快捷收货",
+			ID:            orderID,
+			UserID:        userID,
+			TotalAmount:   39900,
+			Status:        1,
+			ReceiverName:  "秒杀快捷收货",
 			ReceiverPhone: "13800000000",
-			ReceiverAddr: "虚拟网络秒杀节点",
+			ReceiverAddr:  "虚拟网络秒杀节点",
 		}
 		if err := core.DB.Create(&order).Error; err == nil {
 			orderItem := models.OrderItem{
-				OrderID:   orderID,
-				SkuID:     1,
-				Price:     39900,
-				Quantity:  1,
+				OrderID:  orderID,
+				SkuID:    1,
+				Price:    39900,
+				Quantity: 1,
 			}
 			core.DB.Create(&orderItem)
 		}

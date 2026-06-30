@@ -167,6 +167,7 @@ export const useCartStore = defineStore('cart', () => {
     addToCart,
     updateQuantity,
     removeFromCart,
+    saveCart,
     clearCart
   }
 })

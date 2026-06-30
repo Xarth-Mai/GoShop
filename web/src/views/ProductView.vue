@@ -3,7 +3,6 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useCartStore } from '../stores/cart'
 import { useAuthStore } from '../stores/auth'
-import Card from '../components/ui/Card.vue'
 import Button from '../components/ui/Button.vue'
 import Badge from '../components/ui/Badge.vue'
 import { signedFetch } from '../api/request'
@@ -152,8 +151,9 @@ const claimCoupon = async (couponId: number) => {
 }
 
 const categoryName = computed(() => {
-  if (!product.value) return ''
-  const cat = categories.value.find(c => c.id === product.value.categoryId)
+  const currentProduct = product.value
+  if (!currentProduct) return ''
+  const cat = categories.value.find(c => c.id === currentProduct.categoryId)
   return cat ? cat.name : '商品'
 })
 
@@ -212,22 +212,7 @@ const handleAddToCart = async () => {
     image: product.value.mainImage
   }, quantity.value)
 
-  // Cloud database sync
-  if (authStore.isLoggedIn) {
-    try {
-      await signedFetch('/api/cart', {
-        method: 'POST',
-        body: JSON.stringify({
-          skuId: selectedSku.value.id,
-          quantity: quantity.value
-        })
-      })
-    } catch (e) {
-      console.warn('云端购物车同步失败，暂存本地: ', e)
-    }
-  }
-
-  showMessage('商品已成功加入云端购物车！', 'success')
+  showMessage(authStore.isLoggedIn ? '商品已成功加入云端购物车！' : '商品已成功加入本地购物车！', 'success')
 }
 
 const handleSeckillPurchase = async () => {
@@ -304,7 +289,7 @@ const handleStandardPurchase = () => {
 
         <div class="price-box">
           <span class="price-label">售价</span>
-          <span class="price-value">¥{{ ((selectedSku?.price || product.price) / 100).toFixed(2) }}</span>
+          <span class="price-value">¥{{ ((selectedSku?.price || product.skus?.[0]?.price || 0) / 100).toFixed(2) }}</span>
         </div>
 
         <!-- Coupons Claim Section -->

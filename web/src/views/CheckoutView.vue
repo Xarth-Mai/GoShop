@@ -2,7 +2,6 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useCartStore } from '../stores/cart'
-import { useAuthStore } from '../stores/auth'
 import Card from '../components/ui/Card.vue'
 import Button from '../components/ui/Button.vue'
 import Input from '../components/ui/Input.vue'
@@ -10,7 +9,6 @@ import { signedFetch } from '../api/request'
 
 const router = useRouter()
 const cartStore = useCartStore()
-const authStore = useAuthStore()
 
 const items = computed(() => cartStore.selectedItems)
 const subtotal = computed(() => cartStore.selectedTotalPrice)
