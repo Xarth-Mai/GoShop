@@ -35,3 +35,6 @@ go.work.sum
 config.yaml
 goshop
 GoShop
+
+# Untracked Enterprise Plan
+goshop_enterprise_plan.md
