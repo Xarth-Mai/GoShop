@@ -13,9 +13,12 @@ import (
 
 	"GoShop/config"
 	"GoShop/core"
+	_ "GoShop/docs"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 type Order struct {
@@ -141,6 +144,11 @@ func startDelayQueueWorker() {
 	}
 }
 
+// @title           GoShop API
+// @version         1.0
+// @description     一个基于 Go 语言构建的轻量级、高性能通用电商后端系统。
+// @host            localhost:3233
+// @BasePath        /
 func main() {
 	// 1. 初始化配置
 	configPath := "config.yaml"
@@ -189,6 +197,9 @@ func main() {
 	r.StaticFile("/favicon.ico", "./web/dist/favicon.ico")
 	r.StaticFile("/", "./web/dist/index.html")
 
+	// 5.1 Swagger API 文档
+	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
 	// SPA Routing Fallback
 	r.NoRoute(func(c *gin.Context) {
 		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
@@ -225,7 +236,12 @@ func main() {
 	})
 
 	// 7. API 对接路由
-	// 获取监控指标与日志
+	// @Summary      Get monitoring metrics and logs
+	// @Description  Retrieve Valkey pre-decrement stock metrics, lock count, and real-time logs
+	// @Tags         metrics
+	// @Produce      json
+	// @Success      200  {object}  map[string]interface{}
+	// @Router       /api/metrics [get]
 	r.GET("/api/metrics", func(c *gin.Context) {
 		ctx := context.Background()
 
@@ -281,7 +297,13 @@ func main() {
 		})
 	})
 
-	// 模拟秒杀下单
+	// @Summary      Perform a high-concurrency seckill order creation
+	// @Description  Deduct Valkey cache stock and create an order in GORM PostgreSQL with status=1 (pending payment)
+	// @Tags         seckill
+	// @Produce      json
+	// @Success      200  {object}  map[string]interface{}
+	// @Failure      400  {object}  map[string]interface{}
+	// @Router       /api/seckill [post]
 	r.POST("/api/seckill", func(c *gin.Context) {
 		ctx := context.Background()
 
@@ -353,7 +375,15 @@ func main() {
 		})
 	})
 
-	// 模拟订单支付
+	// @Summary      Pay a seckill order
+	// @Description  Confirm payment for a pending order, remove from delay queue, and mark as paid
+	// @Tags         pay
+	// @Accept       json
+	// @Produce      json
+	// @Param        request  body  PayRequest  true  "Order ID to pay"
+	// @Success      200  {object}  map[string]interface{}
+	// @Failure      400  {object}  map[string]interface{}
+	// @Router       /api/pay [post]
 	r.POST("/api/pay", func(c *gin.Context) {
 		var req PayRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -398,7 +428,12 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "paid"})
 	})
 
-	// 重置库存与清空数据
+	// @Summary      Reset the mock system state
+	// @Description  Clear redis logs, delay queue, set stock back to 87, and delete mock database orders
+	// @Tags         system
+	// @Produce      json
+	// @Success      200  {object}  map[string]interface{}
+	// @Router       /api/reset [post]
 	r.POST("/api/reset", func(c *gin.Context) {
 		ctx := context.Background()
 

@@ -51,10 +51,10 @@
 ## 🛠️ 技术栈选型
 
 * **后端核心:** Go + Gin (轻量极速的 Web 框架，生产环境路由性能卓越)
-* **后台前端:** React / Vue 3 + Tailwind CSS (现代响应式、精美的前端运营管理控制台)
-* **持久层:** PostgreSQL 14+ + GORM (利用 PG 强大的并发连接处理能力与 ACID 事务特性)
-* **缓存与异步组件:** Valkey 7+ (Redis 社区开源正统分支，负责高并发缓冲、Lua 锁与异步队列)
-* **API 规范:** Swagger (利用 `swaggo/swag` 自动化生成可交互的 RESTful API 文档)
+* **后台前端:** Vue 3 + Pinia + Vue Router + Vanilla CSS (严格遵循 Anthropic 暖乳白极简设计规范，实现多页面商品选购、购物车及延迟队列秒杀支付链路，深度集成实时技术引擎监控看板)
+* **持久层:** PostgreSQL 14+ + GORM (利用 PG 强大的关系型事务特性存储 SPU/SKU 及订单信息)
+* **缓存与异步组件:** Valkey 7+ (Redis 社区正统分支，负责高并发 Lua 原子扣减库存与异步延迟队列)
+* **API 规范:** Swagger (利用 `swaggo/swag` 自动化生成可交互的 RESTful API 文档，本地完美渲染)
 
 ---
 
@@ -119,8 +119,10 @@ cp config.example.yaml config.yaml
 ## 📚 API 文档 (Swagger)
 
 本项目集成了 Swagger 文档以方便接口调试与对齐。
-在服务启动后，打开浏览器访问以下地址即可查看完整的 RESTful 接口细节与传参规范：
-👉 **[http://127.0.0.1:3233/swagger/index.html](https://shop.lzzz.ink/swagger/index.html)**
+在本地服务启动后，打开浏览器访问以下地址即可查看完整的 RESTful 接口细节与传参规范，支持本地接口调试与交互：
+👉 **[http://localhost:3233/swagger/index.html](http://localhost:3233/swagger/index.html)**
+
+（在线演示版文档可访问：[https://shop.lzzz.ink/swagger/index.html](https://shop.lzzz.ink/swagger/index.html)）
 
 ---
 

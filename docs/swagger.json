@@ -1,0 +1,12 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "一个基于 Go 语言构建的轻量级、高性能通用电商后端系统。",
+        "title": "GoShop API",
+        "contact": {},
+        "version": "1.0"
+    },
+    "host": "localhost:3233",
+    "basePath": "/",
+    "paths": {}
+}
