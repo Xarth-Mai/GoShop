@@ -18,6 +18,7 @@ func RegisterRoutes(r *gin.Engine) {
 		auth := api.Group("/auth")
 		auth.Use(core.RateLimitMiddleware())
 		{
+			auth.GET("/sign-key", SignKey)
 			auth.POST("/register", Register)
 			auth.POST("/login", Login)
 			auth.POST("/refresh", Refresh)

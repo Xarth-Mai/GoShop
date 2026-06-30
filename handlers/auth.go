@@ -27,6 +27,19 @@ type RefreshReq struct {
 	RefreshToken string `json:"refreshToken" binding:"required"`
 }
 
+// SignKey 返回当前前端写操作签名所需的 HMAC key。
+func SignKey(c *gin.Context) {
+	secret := "goshop_jwt_hmac_secret"
+	if config.GlobalConfig != nil && config.GlobalConfig.JWT.Secret != "" {
+		secret = config.GlobalConfig.JWT.Secret
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "success",
+		"signKey": secret,
+	})
+}
+
 // Register 注册接口
 func Register(c *gin.Context) {
 	var req RegisterReq

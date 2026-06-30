@@ -1,4 +1,6 @@
--- 创建用户表
+-- GoShop PostgreSQL 初始化脚本
+-- 与当前 GORM 模型保持一致；可用于空库初始化，也可配合服务启动后的 AutoMigrate 使用。
+
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     username VARCHAR(64) UNIQUE NOT NULL,
@@ -8,66 +10,152 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 创建 SPU 表（商品基本信息）
+CREATE TABLE IF NOT EXISTS categories (
+    id SERIAL PRIMARY KEY,
+    parent_id INTEGER NOT NULL DEFAULT 0,
+    name VARCHAR(64) NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS spus (
     id SERIAL PRIMARY KEY,
+    category_id INTEGER NOT NULL REFERENCES categories(id),
     name VARCHAR(128) NOT NULL,
+    subtitle VARCHAR(256),
     description TEXT,
+    main_image VARCHAR(512),
+    images JSONB,
+    detail_html TEXT,
+    status INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 创建 SKU 表（商品具体规格单品）
 CREATE TABLE IF NOT EXISTS skus (
     id SERIAL PRIMARY KEY,
-    spu_id INTEGER REFERENCES spus(id) ON DELETE CASCADE,
+    spu_id INTEGER NOT NULL REFERENCES spus(id) ON DELETE CASCADE,
     title VARCHAR(256) NOT NULL,
-    price INT NOT NULL, -- 以“分”为单位，规避浮点数精度丢失
-    stock INT NOT NULL DEFAULT 0, -- 物理数据库库存
+    specs JSONB,
+    price INTEGER NOT NULL,
+    stock INTEGER NOT NULL DEFAULT 0,
+    sales_volume INTEGER DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 创建订单表
+CREATE TABLE IF NOT EXISTS coupons (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(64) NOT NULL,
+    type INTEGER NOT NULL,
+    value INTEGER NOT NULL,
+    min_amount INTEGER NOT NULL DEFAULT 0,
+    start_time TIMESTAMP WITH TIME ZONE,
+    end_time TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS user_coupons (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    coupon_id INTEGER NOT NULL REFERENCES coupons(id),
+    status INTEGER NOT NULL DEFAULT 0,
+    used_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_user_coupons_user_id ON user_coupons(user_id);
+
+CREATE TABLE IF NOT EXISTS addresses (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    receiver_name VARCHAR(256) NOT NULL,
+    receiver_phone VARCHAR(256) NOT NULL,
+    province VARCHAR(64) NOT NULL,
+    city VARCHAR(64) NOT NULL,
+    district VARCHAR(64) NOT NULL,
+    detail_address VARCHAR(512) NOT NULL,
+    is_default BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_addresses_user_id ON addresses(user_id);
+
+CREATE TABLE IF NOT EXISTS cart_items (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    sku_id INTEGER NOT NULL REFERENCES skus(id),
+    quantity INTEGER NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_cart_items_user_id ON cart_items(user_id);
+
 CREATE TABLE IF NOT EXISTS orders (
-    id VARCHAR(64) PRIMARY KEY, -- 订单唯一识别号
-    user_id INTEGER REFERENCES users(id),
-    total_amount INT NOT NULL, -- 订单总金额（分）
-    status SMALLINT NOT NULL DEFAULT 1, -- 1: 待支付, 2: 已支付, 3: 已取消, 4: 已发货, 5: 已完成
+    id VARCHAR(64) PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    total_amount INTEGER NOT NULL,
+    discount_amount INTEGER NOT NULL DEFAULT 0,
+    shipping_fee INTEGER NOT NULL DEFAULT 0,
+    tax_fee INTEGER NOT NULL DEFAULT 0,
+    status INTEGER NOT NULL DEFAULT 1,
+    refund_reason VARCHAR(256),
+    refund_proof VARCHAR(512),
+    receiver_name VARCHAR(256),
+    receiver_phone VARCHAR(256),
+    receiver_addr VARCHAR(512),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
 
--- 创建订单商品详情表
 CREATE TABLE IF NOT EXISTS order_items (
     id SERIAL PRIMARY KEY,
-    order_id VARCHAR(64) REFERENCES orders(id) ON DELETE CASCADE,
-    sku_id INTEGER REFERENCES skus(id),
-    price INT NOT NULL, -- 下单时的 SKU 单价
-    quantity INT NOT NULL, -- 订购数量
+    order_id VARCHAR(64) NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    sku_id INTEGER NOT NULL REFERENCES skus(id),
+    price INTEGER NOT NULL,
+    quantity INTEGER NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
 
--- ==========================================
--- 插入基础演示数据
--- ==========================================
+CREATE TABLE IF NOT EXISTS dead_letter_orders (
+    id SERIAL PRIMARY KEY,
+    order_id VARCHAR(64) NOT NULL UNIQUE,
+    reason TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
 
--- 1. 插入一个测试用户 (密码明文为 "123456" 的 bcrypt 密文)
-INSERT INTO users (username, password_hash, email) VALUES 
+INSERT INTO users (username, password_hash, email) VALUES
 ('test_user', '$2a$10$tZ276V04s1J3/gO.wIu88.K7e/701h6.6Xj/N3tB5d0QZ3r5lM5Hq', 'test@example.com')
 ON CONFLICT (username) DO NOTHING;
 
--- 2. 插入测试 SPU 商品
-INSERT INTO spus (id, name, description) VALUES 
-(1, 'GoShop 极速机械键盘', '客制化 87 键，超低延迟红轴机械键盘，专为高并发编程而生。'),
-(2, 'GoShop 电商纪念版 T 恤', '100% 纯棉定制，印有经典的 Gopher 与 Valkey 联合 LOGO。')
+INSERT INTO categories (id, name, sort_order) VALUES
+(1, '智能手机', 1),
+(2, '笔记本', 2),
+(3, '穿戴数码', 3),
+(4, '智能平板', 4)
 ON CONFLICT (id) DO NOTHING;
 
--- 3. 插入测试 SKU 细分规格
-INSERT INTO skus (id, spu_id, title, price, stock) VALUES 
-(1, 1, '87 键客制化红轴键盘-冰晶蓝', 39900, 100),
-(2, 1, '87 键客制化红轴键盘-极夜黑', 39900, 50),
-(3, 2, '纪念版 T 恤-白色-L码', 9900, 200),
-(4, 2, '纪念版 T 恤-黑色-XL码', 9900, 150)
+INSERT INTO spus (id, category_id, name, subtitle, description, main_image, images, detail_html, status) VALUES
+(1, 1, 'Claude Phone 1', '懂你的思考伙伴，掌上轻量体验', 'Claude Phone 1 采用极简设计与温暖配色。', 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&w=800&q=80', '["https://images.unsplash.com/photo-1511707171634-5f897ff02aa9"]', '<p>Claude Phone 1 详细介绍内容...</p>', 1),
+(2, 2, 'Anthropic Book Pro', '极致性能，为灵感创作而生', '搭载专为大模型应用优化的新一代芯片。', 'https://images.unsplash.com/photo-1496181130204-755241544e3f?auto=format&fit=crop&w=800&q=80', '["https://images.unsplash.com/photo-1496181130204-755241544e3f"]', '<p>Anthropic Book Pro 详细介绍内容...</p>', 1),
+(3, 3, 'Artifacts Earbuds', '纯净原音，静享心流时刻', '智能主动降噪耳机 Artifacts Earbuds。', 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=800&q=80', '["https://images.unsplash.com/photo-1505740420928-5e560c06d30e"]', '<p>Artifacts Earbuds 详细介绍内容...</p>', 1),
+(4, 4, 'Spike Pad Air', '轻薄随行，创意触手可及', 'Spike Pad Air 只有 6.1 毫米的厚度。', 'https://images.unsplash.com/photo-1544244015-0df4b3ffc6b0?auto=format&fit=crop&w=800&q=80', '["https://images.unsplash.com/photo-1544244015-0df4b3ffc6b0"]', '<p>Spike Pad Air 详细介绍内容...</p>', 1)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO skus (id, spu_id, title, specs, price, stock, sales_volume) VALUES
+(1, 1, 'Haiku (128GB)', '{"规格": "128GB / 温暖沙丘"}', 39900, 87, 0),
+(2, 1, 'Sonnet (256GB)', '{"规格": "256GB / 珊瑚礁"}', 59900, 50, 0),
+(3, 1, 'Opus (512GB)', '{"规格": "512GB / 深邃星空"}', 89900, 20, 0),
+(4, 2, 'Haiku Core (16G+512G)', '{"规格": "16GB / 512GB SSD / 银色"}', 899900, 15, 0),
+(5, 2, 'Sonnet Core (32G+1T)', '{"规格": "32GB / 1TB SSD / 深空灰"}', 1299900, 10, 0),
+(6, 2, 'Opus Core (64G+2T)', '{"规格": "64GB / 2TB SSD / 珊瑚金"}', 1899900, 5, 0),
+(7, 3, 'Standard Edition', '{"规格": "标准版 / 象牙白"}', 99900, 100, 0),
+(8, 3, 'ANC Pro Edition', '{"规格": "降噪旗舰版 / 珊瑚红"}', 149900, 45, 0),
+(9, 4, 'WiFi (128GB)', '{"规格": "128GB / 经典灰"}', 459900, 30, 0),
+(10, 4, 'Cellular + WiFi (256GB)', '{"规格": "256GB / 蜂窝版 / 沙丘金"}', 559900, 12, 0)
 ON CONFLICT (id) DO NOTHING;
