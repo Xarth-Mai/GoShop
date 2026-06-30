@@ -14,6 +14,7 @@ import (
 	"GoShop/config"
 	"GoShop/core"
 	_ "GoShop/docs"
+	"GoShop/models"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -174,6 +175,19 @@ func main() {
 		log.Println("[警告] 系统将处于数据库未就绪状态运行。")
 	} else {
 		log.Println("PostgreSQL 数据库连接成功 (读写分离就绪).")
+		// 数据库自动迁移
+		err = core.DB.AutoMigrate(&models.Category{}, &models.Spu{}, &models.Sku{}, &Order{}, &OrderItem{})
+		if err != nil {
+			log.Printf("[错误] 数据库自动迁移失败: %v", err)
+		} else {
+			log.Println("数据库迁移/更新成功.")
+			// 测试数据种子化
+			if err := models.SeedProducts(core.DB); err != nil {
+				log.Printf("[错误] 数据种子初始化失败: %v", err)
+			} else {
+				log.Println("数据库初始商品数据对齐完成.")
+			}
+		}
 	}
 
 	// 3. 初始化 Redis (Valkey)
@@ -305,6 +319,109 @@ func main() {
 			"logs":          logs,
 			"pendingOrders": pendingOrders,
 		})
+	})
+
+	// @Summary      Get all categories
+	// @Description  Retrieve multi-level product categories list
+	// @Tags         products
+	// @Produce      json
+	// @Success      200  {array}   models.Category
+	// @Router       /api/categories [get]
+	r.GET("/api/categories", func(c *gin.Context) {
+		var categories []models.Category
+		if core.DB == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "数据库未就绪"})
+			return
+		}
+		if err := core.ReplicaDB.Order("sort_order asc").Find(&categories).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, categories)
+	})
+
+	// @Summary      Get products list
+	// @Description  Retrieve products list with category filtering, paging, and sorting
+	// @Tags         products
+	// @Produce      json
+	// @Param        categoryId  query  int  false  "Category ID filter"
+	// @Param        keyword     query  string  false  "Keyword search"
+	// @Param        page        query  int  false  "Page number (default 1)"
+	// @Param        pageSize    query  int  false  "Page size (default 10)"
+	// @Success      200  {array}   models.Spu
+	// @Router       /api/products [get]
+	r.GET("/api/products", func(c *gin.Context) {
+		if core.DB == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "数据库未就绪"})
+			return
+		}
+		categoryIdStr := c.Query("categoryId")
+		keyword := c.Query("keyword")
+		pageStr := c.DefaultQuery("page", "1")
+		pageSizeStr := c.DefaultQuery("pageSize", "10")
+
+		page, _ := strconv.Atoi(pageStr)
+		pageSize, _ := strconv.Atoi(pageSizeStr)
+		if page < 1 { page = 1 }
+		if pageSize < 1 { pageSize = 10 }
+
+		query := core.ReplicaDB.Model(&models.Spu{}).Where("status = ?", 1)
+
+		if categoryIdStr != "" {
+			categoryId, err := strconv.Atoi(categoryIdStr)
+			if err == nil && categoryId > 0 {
+				query = query.Where("category_id = ?", categoryId)
+			}
+		}
+
+		if keyword != "" {
+			query = query.Where("name LIKE ? OR subtitle LIKE ?", "%"+keyword+"%", "%"+keyword+"%")
+		}
+
+		var total int64
+		query.Count(&total)
+
+		var products []models.Spu
+		offset := (page - 1) * pageSize
+		if err := query.Offset(offset).Limit(pageSize).Find(&products).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"total":    total,
+			"page":     page,
+			"pageSize": pageSize,
+			"data":     products,
+		})
+	})
+
+	// @Summary      Get product detail
+	// @Description  Retrieve single product details and its associated SKUs list
+	// @Tags         products
+	// @Produce      json
+	// @Param        id   path  int  true  "Product SPU ID"
+	// @Success      200  {object}  models.Spu
+	// @Router       /api/products/{id} [get]
+	r.GET("/api/products/:id", func(c *gin.Context) {
+		if core.DB == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "数据库未就绪"})
+			return
+		}
+		idStr := c.Param("id")
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "无效的商品ID"})
+			return
+		}
+
+		var product models.Spu
+		if err := core.ReplicaDB.Preload("Skus").First(&product, "id = ? AND status = ?", id, 1).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"message": "商品未找到"})
+			return
+		}
+
+		c.JSON(http.StatusOK, product)
 	})
 
 	// @Summary      Perform a high-concurrency seckill order creation

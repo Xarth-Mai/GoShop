@@ -1,20 +1,74 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { MOCK_PRODUCTS } from '../api/mockData'
 import Card from '../components/ui/Card.vue'
 import Badge from '../components/ui/Badge.vue'
 import Button from '../components/ui/Button.vue'
 
-const router = useRouter()
-const categories = ['全部', '智能手机', '笔记本', '穿戴数码', '智能平板']
-const activeCategory = ref('全部')
+interface CategoryItem {
+  id: number
+  name: string
+}
 
-const filteredProducts = computed(() => {
-  if (activeCategory.value === '全部') {
-    return MOCK_PRODUCTS
+interface ProductItem {
+  id: number
+  categoryId: number
+  name: string
+  subtitle: string
+  mainImage: string
+  price: number
+  status: number
+}
+
+const router = useRouter()
+const categories = ref<CategoryItem[]>([{ id: 0, name: '全部' }])
+const activeCategoryId = ref(0)
+const products = ref<ProductItem[]>([])
+const loading = ref(false)
+
+const fetchCategories = async () => {
+  try {
+    const res = await fetch('/api/categories')
+    if (res.ok) {
+      const data = await res.json()
+      categories.value = [{ id: 0, name: '全部' }, ...data]
+    }
+  } catch (err) {
+    console.error('获取分类失败:', err)
   }
-  return MOCK_PRODUCTS.filter(p => p.category === activeCategory.value)
+}
+
+const fetchProducts = async () => {
+  loading.value = true
+  try {
+    let url = '/api/products?pageSize=100'
+    if (activeCategoryId.value > 0) {
+      url += `&categoryId=${activeCategoryId.value}`
+    }
+    const res = await fetch(url)
+    if (res.ok) {
+      const data = await res.json()
+      products.value = data.data || []
+    }
+  } catch (err) {
+    console.error('获取商品失败:', err)
+  } finally {
+    loading.value = false
+  }
+}
+
+const getCategoryName = (categoryId: number) => {
+  const cat = categories.value.find(c => c.id === categoryId)
+  return cat ? cat.name : ''
+}
+
+watch(activeCategoryId, () => {
+  fetchProducts()
+})
+
+onMounted(() => {
+  fetchCategories()
+  fetchProducts()
 })
 
 const handleViewProduct = (id: number) => {
@@ -33,8 +87,8 @@ const handleViewProduct = (id: number) => {
           GoShop 带来全新温和美学设计与企业级高并发底座。这不仅是一个购物平台，更是每一次顺畅交互、极致原子化库存扣减背后的技术结晶。
         </p>
         <div class="hero-actions">
-          <Button @click="activeCategory = '智能手机'" variant="primary">立即选购</Button>
-          <a href="/swagger/index.html" target="_blank" class="tech-doc-link">
+          <Button @click="activeCategoryId = 1" variant="primary">立即选购</Button>
+          <a href="http://localhost:3233/swagger/index.html" target="_blank" class="tech-doc-link">
             技术文档
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
@@ -64,20 +118,23 @@ const handleViewProduct = (id: number) => {
       <div class="tabs-container">
         <button
           v-for="cat in categories"
-          :key="cat"
-          @click="activeCategory = cat"
-          :class="['category-tab', { active: activeCategory === cat }]"
+          :key="cat.id"
+          @click="activeCategoryId = cat.id"
+          :class="['category-tab', { active: activeCategoryId === cat.id }]"
         >
-          {{ cat }}
+          {{ cat.name }}
         </button>
       </div>
     </section>
 
     <!-- Product Grid -->
     <section class="products-section">
-      <div class="products-grid">
+      <div v-if="loading" class="loading-state">
+        正在拉取商品列表...
+      </div>
+      <div v-else class="products-grid">
         <Card
-          v-for="product in filteredProducts"
+          v-for="product in products"
           :key="product.id"
           variant="cream"
           :hoverable="true"
@@ -85,10 +142,10 @@ const handleViewProduct = (id: number) => {
           @click="handleViewProduct(product.id)"
         >
           <div class="product-image-wrapper">
-            <img :src="product.image" :alt="product.name" class="product-image" />
+            <img :src="product.mainImage" :alt="product.name" class="product-image" />
             <div class="product-tag-row">
-              <Badge v-for="tag in product.tags" :key="tag" variant="pill" class="product-tag">
-                {{ tag }}
+              <Badge variant="pill" class="product-tag">
+                {{ getCategoryName(product.categoryId) }}
               </Badge>
             </div>
           </div>
@@ -96,7 +153,10 @@ const handleViewProduct = (id: number) => {
             <h3 class="product-title">{{ product.name }}</h3>
             <p class="product-subtitle">{{ product.subtitle }}</p>
             <div class="product-footer">
-              <span class="product-price">¥{{ (product.price / 100).toFixed(2) }}</span>
+              <span class="product-price">
+                <!-- If SPU is 1 (Claude Phone), the price is determined by the lowest SKU price or SPU default -->
+                ¥{{ (product.price ? product.price / 100 : 399.00).toFixed(2) }} 起
+              </span>
               <span class="view-detail-btn">
                 购买
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

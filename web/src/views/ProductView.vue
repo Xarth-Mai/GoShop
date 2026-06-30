@@ -1,13 +1,34 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { MOCK_PRODUCTS } from '../api/mockData'
-import type { Product, Sku } from '../api/mockData'
 import { useCartStore } from '../stores/cart'
 import { useAuthStore } from '../stores/auth'
 import Card from '../components/ui/Card.vue'
 import Button from '../components/ui/Button.vue'
 import Badge from '../components/ui/Badge.vue'
+
+interface Sku {
+  id: number
+  spuId: number
+  title: string
+  specs: string
+  price: number
+  stock: number
+  salesVolume: number
+}
+
+interface Product {
+  id: number
+  categoryId: number
+  name: string
+  subtitle: string
+  description: string
+  mainImage: string
+  images: string
+  detailHtml: string
+  status: number
+  skus: Sku[]
+}
 
 const props = defineProps<{
   id: string
@@ -19,6 +40,7 @@ const authStore = useAuthStore()
 
 const product = ref<Product | null>(null)
 const selectedSku = ref<Sku | null>(null)
+const categories = ref<any[]>([])
 const quantity = ref(1)
 const loading = ref(false)
 const message = ref('')
@@ -28,14 +50,43 @@ const messageType = ref<'success' | 'error' | ''>('')
 const backendStock = ref<number | null>(null)
 const isSeckilling = ref(false)
 
-const getProduct = () => {
-  const prodId = parseInt(props.id)
-  const found = MOCK_PRODUCTS.find(p => p.id === prodId)
-  if (found) {
-    product.value = found
-    selectedSku.value = found.skus[0] || null
+const getProduct = async () => {
+  loading.value = true
+  try {
+    const res = await fetch(`/api/products/${props.id}`)
+    if (res.ok) {
+      const data = await res.json()
+      product.value = data
+      selectedSku.value = data.skus?.[0] || null
+      
+      // If it is Claude Phone 1 (SPU 1), start fetching Valkey stock
+      if (product.value?.id === 1) {
+        fetchStock()
+      }
+    }
+  } catch (err) {
+    console.error('获取商品详情失败:', err)
+  } finally {
+    loading.value = false
   }
 }
+
+const fetchCategories = async () => {
+  try {
+    const res = await fetch('/api/categories')
+    if (res.ok) {
+      categories.value = await res.json()
+    }
+  } catch (err) {
+    console.error('获取分类失败:', err)
+  }
+}
+
+const categoryName = computed(() => {
+  if (!product.value) return ''
+  const cat = categories.value.find(c => c.id === product.value.categoryId)
+  return cat ? cat.name : '商品'
+})
 
 const selectSku = (sku: Sku) => {
   selectedSku.value = sku
@@ -68,10 +119,12 @@ const fetchStock = async () => {
 }
 
 onMounted(() => {
+  fetchCategories()
   getProduct()
-  fetchStock()
+  
   // If it is the seckill product, poll stock
-  if (product.value?.id === 1) {
+  const idNum = parseInt(props.id)
+  if (idNum === 1) {
     const timer = setInterval(fetchStock, 3000)
     return () => clearInterval(timer)
   }
@@ -84,9 +137,9 @@ const handleAddToCart = () => {
     skuId: selectedSku.value.id,
     spuId: product.value.id,
     spuName: product.value.name,
-    skuName: selectedSku.value.name,
+    skuName: selectedSku.value.title,
     price: selectedSku.value.price,
-    image: product.value.image
+    image: product.value.mainImage
   }, quantity.value)
 
   showMessage('商品已成功加入购物车！', 'success')
@@ -136,9 +189,9 @@ const handleStandardPurchase = () => {
     skuId: selectedSku.value.id,
     spuId: product.value.id,
     spuName: product.value.name,
-    skuName: selectedSku.value.name,
+    skuName: selectedSku.value.title,
     price: selectedSku.value.price,
-    image: product.value.image
+    image: product.value.mainImage
   }, quantity.value)
   
   router.push('/checkout')
@@ -151,7 +204,7 @@ const handleStandardPurchase = () => {
       <!-- Image Gallery -->
       <div class="product-gallery">
         <div class="image-wrapper">
-          <img :src="product.image" :alt="product.name" />
+          <img :src="product.mainImage" :alt="product.name" />
         </div>
       </div>
 
@@ -159,7 +212,7 @@ const handleStandardPurchase = () => {
       <div class="product-meta">
         <div class="meta-header">
           <Badge variant="coral" v-if="product.id === 1">秒杀特惠</Badge>
-          <span class="category-name">{{ product.category }}</span>
+          <span class="category-name">{{ categoryName }}</span>
         </div>
 
         <h1 class="typography-display-sm product-title">{{ product.name }}</h1>
@@ -184,7 +237,7 @@ const handleStandardPurchase = () => {
               @click="selectSku(sku)"
               :class="['sku-btn', { active: selectedSku?.id === sku.id }]"
             >
-              {{ sku.name }}
+              {{ sku.title }}
             </button>
           </div>
         </div>
