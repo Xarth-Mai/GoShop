@@ -1,0 +1,55 @@
+:root {
+  /* Colors */
+  --colors-primary: #cc785c;
+  --colors-primary-active: #a9583e;
+  --colors-primary-disabled: #e6dfd8;
+  --colors-accent-teal: #5db8a6;
+  --colors-accent-amber: #e8a55a;
+
+  --colors-canvas: #faf9f5;
+  --colors-surface-soft: #f5f0e8;
+  --colors-surface-card: #efe9de;
+  --colors-surface-cream-strong: #e8e0d2;
+  --colors-surface-dark: #181715;
+  --colors-surface-dark-elevated: #252320;
+  --colors-surface-dark-soft: #1f1e1b;
+  --colors-hairline: #e6dfd8;
+  --colors-hairline-soft: #ebe6df;
+
+  --colors-ink: #141413;
+  --colors-body-strong: #252523;
+  --colors-body: #3d3d3a;
+  --colors-muted: #6c6a64;
+  --colors-muted-soft: #8e8b82;
+  --colors-on-primary: #ffffff;
+  --colors-on-dark: #faf9f5;
+  --colors-on-dark-soft: #a09d96;
+
+  --colors-success: #5db872;
+  --colors-warning: #d4a017;
+  --colors-error: #c64545;
+
+  /* Font Families */
+  --font-serif: 'Cormorant Garamond', Garamond, 'Times New Roman', serif;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Spacing */
+  --spacing-xxs: 4px;
+  --spacing-xs: 8px;
+  --spacing-sm: 12px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-xxl: 48px;
+  --spacing-section: 96px;
+
+  /* Border Radius */
+  --rounded-xs: 4px;
+  --rounded-sm: 6px;
+  --rounded-md: 8px;
+  --rounded-lg: 12px;
+  --rounded-xl: 16px;
+  --rounded-pill: 9999px;
+  --rounded-full: 50%;
+}

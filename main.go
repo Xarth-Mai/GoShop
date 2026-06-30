@@ -187,8 +187,16 @@ func main() {
 	// 5. 静态资源托管
 	r.Static("/assets", "./web/dist/assets")
 	r.StaticFile("/favicon.ico", "./web/dist/favicon.ico")
-	r.StaticFile("/phone.png", "./web/dist/phone.png")
 	r.StaticFile("/", "./web/dist/index.html")
+
+	// SPA Routing Fallback
+	r.NoRoute(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+			c.JSON(http.StatusNotFound, gin.H{"message": "API not found"})
+			return
+		}
+		c.File("./web/dist/index.html")
+	})
 
 	// 6. 注册基础路由与健康检查
 	r.GET("/health", func(c *gin.Context) {

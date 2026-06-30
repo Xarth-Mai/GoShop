@@ -1,0 +1,264 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&display=swap');
+@import './design-tokens.css';
+
+/* Base Style Resets */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--colors-canvas);
+  color: var(--colors-body);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.5;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  color: var(--colors-ink);
+  font-family: var(--font-serif);
+  font-weight: 400;
+}
+
+code, pre {
+  font-family: var(--font-mono);
+}
+
+a {
+  color: var(--colors-primary);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  outline: none;
+  font-family: var(--font-sans);
+  transition: all 0.2s ease;
+}
+
+/* Typography Helper Classes */
+.typography-display-xl {
+  font-family: var(--font-serif);
+  font-size: 64px;
+  font-weight: 400;
+  line-height: 1.05;
+  letter-spacing: -1.5px;
+  color: var(--colors-ink);
+}
+.typography-display-lg {
+  font-family: var(--font-serif);
+  font-size: 48px;
+  font-weight: 400;
+  line-height: 1.1;
+  letter-spacing: -1px;
+  color: var(--colors-ink);
+}
+.typography-display-md {
+  font-family: var(--font-serif);
+  font-size: 36px;
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: -0.5px;
+  color: var(--colors-ink);
+}
+.typography-display-sm {
+  font-family: var(--font-serif);
+  font-size: 28px;
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: -0.3px;
+  color: var(--colors-ink);
+}
+.typography-title-lg {
+  font-family: var(--font-sans);
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0;
+  color: var(--colors-ink);
+}
+.typography-title-md {
+  font-family: var(--font-sans);
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.4;
+  letter-spacing: 0;
+  color: var(--colors-ink);
+}
+.typography-title-sm {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.4;
+  letter-spacing: 0;
+  color: var(--colors-ink);
+}
+.typography-body-md {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1.55;
+  letter-spacing: 0;
+  color: var(--colors-body);
+}
+.typography-body-sm {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.55;
+  letter-spacing: 0;
+  color: var(--colors-muted);
+}
+.typography-caption {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+.typography-caption-uppercase {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+.typography-code {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.6;
+  letter-spacing: 0;
+}
+
+/* UI Components */
+.btn-primary {
+  background-color: var(--colors-primary);
+  color: var(--colors-on-primary);
+  font-size: 14px;
+  font-weight: 500;
+  padding: 12px 20px;
+  height: 40px;
+  border-radius: var(--rounded-md);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.btn-primary:hover {
+  background-color: var(--colors-primary-active);
+  text-decoration: none;
+  transform: translateY(-1px);
+}
+.btn-primary:active {
+  transform: translateY(0);
+}
+.btn-primary:disabled {
+  background-color: var(--colors-primary-disabled);
+  color: var(--colors-muted-soft);
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-secondary {
+  background-color: var(--colors-canvas);
+  color: var(--colors-ink);
+  font-size: 14px;
+  font-weight: 500;
+  padding: 12px 20px;
+  height: 40px;
+  border-radius: var(--rounded-md);
+  border: 1px solid var(--colors-hairline);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+.btn-secondary:hover {
+  background-color: var(--colors-surface-soft);
+  text-decoration: none;
+}
+
+.btn-secondary-on-dark {
+  background-color: var(--colors-surface-dark-elevated);
+  color: var(--colors-on-dark);
+  font-size: 14px;
+  font-weight: 500;
+  padding: 12px 20px;
+  height: 40px;
+  border-radius: var(--rounded-md);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.btn-secondary-on-dark:hover {
+  background-color: var(--colors-surface-dark-soft);
+  text-decoration: none;
+}
+
+.badge-pill {
+  background-color: var(--colors-surface-card);
+  color: var(--colors-ink);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 4px 12px;
+  border-radius: var(--rounded-pill);
+  display: inline-block;
+}
+
+.badge-coral {
+  background-color: var(--colors-primary);
+  color: var(--colors-on-primary);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 1.5px;
+  padding: 4px 12px;
+  border-radius: var(--rounded-pill);
+  text-transform: uppercase;
+  display: inline-block;
+}
+
+/* Card */
+.card-cream {
+  background-color: var(--colors-surface-card);
+  border-radius: var(--rounded-lg);
+  padding: var(--spacing-xl);
+  border: 1px solid var(--colors-hairline);
+}
+.card-dark {
+  background-color: var(--colors-surface-dark);
+  color: var(--colors-on-dark);
+  border-radius: var(--rounded-lg);
+  padding: var(--spacing-xl);
+}
+
+/* TextInput */
+.text-input {
+  background-color: var(--colors-canvas);
+  color: var(--colors-ink);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  border-radius: var(--rounded-md);
+  padding: 10px 14px;
+  height: 40px;
+  border: 1px solid var(--colors-hairline);
+  width: 100%;
+  transition: all 0.2s ease;
+}
+.text-input:focus {
+  border-color: var(--colors-primary);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(204, 120, 92, 0.15);
+}
