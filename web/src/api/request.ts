@@ -1,7 +1,25 @@
 import { useAuthStore } from '../stores/auth'
 
-// Front-end signature key (must match backend config jwt.secret)
-const CLIENT_SECRET = 'your_goshop_jwt_secret_key_change_me'
+let cachedSignKey = ''
+
+async function getSignKey(): Promise<string> {
+  if (cachedSignKey) {
+    return cachedSignKey
+  }
+
+  const response = await fetch('/api/auth/sign-key')
+  if (!response.ok) {
+    throw new Error('Failed to fetch request signing key')
+  }
+
+  const data = await response.json()
+  if (!data.signKey) {
+    throw new Error('Missing request signing key')
+  }
+
+  cachedSignKey = data.signKey
+  return cachedSignKey
+}
 
 // Generate random Nonce strings
 function generateNonce(length: number = 18): string {
@@ -64,7 +82,8 @@ export async function signedFetch(path: string, options: RequestInit = {}): Prom
 
     // Sign message format: timestamp + nonce + path + body
     const message = timestamp + nonce + path + bodyStr
-    const sign = await calculateHMAC(CLIENT_SECRET, message)
+    const signKey = await getSignKey()
+    const sign = await calculateHMAC(signKey, message)
 
     headers.set('X-Timestamp', timestamp)
     headers.set('X-Nonce', nonce)

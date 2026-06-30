@@ -24,16 +24,40 @@ const handleLogin = async () => {
   loading.value = true
   errorMsg.value = ''
 
-  // Simulating api auth delay
-  setTimeout(() => {
-    loading.value = false
-    // Simulate generic successful login
-    const mockToken = 'mock-jwt-token-' + Math.random().toString(36).substring(2)
-    authStore.login(username.value, mockToken)
+  try {
+    const response = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        username: username.value,
+        password: password.value
+      })
+    })
+
+    const data = await response.json().catch(() => ({}))
+
+    if (!response.ok) {
+      errorMsg.value = data.message || '登录失败，请检查用户名和密码'
+      return
+    }
+
+    if (!data.accessToken) {
+      errorMsg.value = '登录响应缺少访问凭证'
+      return
+    }
+
+    authStore.login(data.username || username.value, data.accessToken)
 
     const redirectPath = (route.query.redirect as string) || '/'
     router.push(redirectPath)
-  }, 800)
+  } catch (err) {
+    console.error('Login request failed:', err)
+    errorMsg.value = '无法连接登录服务，请稍后重试'
+  } finally {
+    loading.value = false
+  }
 }
 </script>
 
