@@ -101,6 +101,16 @@ func RateLimitMiddleware() gin.HandlerFunc {
 	}
 }
 
+func RequestSignSecret() string {
+	secret := "goshop_jwt_hmac_secret"
+	if config.GlobalConfig != nil && config.GlobalConfig.JWT.Secret != "" {
+		secret = config.GlobalConfig.JWT.Secret
+	}
+
+	sum := sha256.Sum256([]byte("goshop-request-signing:" + secret))
+	return hex.EncodeToString(sum[:])
+}
+
 // ==========================================
 // 3. SignAuthMiddleware 接口防篡改与防重放中间件
 // ==========================================
@@ -173,14 +183,9 @@ func SignAuthMiddleware() gin.HandlerFunc {
 			c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 		}
 
-		// 签名计算规则：hmac_sha256(secret, timestamp + nonce + path + body)
-		secret := "goshop_jwt_hmac_secret"
-		if config.GlobalConfig != nil && config.GlobalConfig.JWT.Secret != "" {
-			secret = config.GlobalConfig.JWT.Secret
-		}
-
+		// 签名计算规则：hmac_sha256(signSecret, timestamp + nonce + path + body)
 		path := c.Request.URL.Path
-		mac := hmac.New(sha256.New, []byte(secret))
+		mac := hmac.New(sha256.New, []byte(RequestSignSecret()))
 		mac.Write([]byte(timestampStr + nonce + path + string(bodyBytes)))
 		expectedSign := hex.EncodeToString(mac.Sum(nil))
 

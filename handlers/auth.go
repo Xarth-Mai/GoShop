@@ -29,14 +29,10 @@ type RefreshReq struct {
 
 // SignKey 返回当前前端写操作签名所需的 HMAC key。
 func SignKey(c *gin.Context) {
-	secret := "goshop_jwt_hmac_secret"
-	if config.GlobalConfig != nil && config.GlobalConfig.JWT.Secret != "" {
-		secret = config.GlobalConfig.JWT.Secret
-	}
-
+	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
-		"signKey": secret,
+		"signKey": core.RequestSignSecret(),
 	})
 }
 

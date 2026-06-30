@@ -24,7 +24,10 @@ func RegisterRoutes(r *gin.Engine) {
 			auth.POST("/refresh", Refresh)
 		}
 
-		// 2. 鉴权与安全防护核心路由组 (引入 Token 验证、限流、以及防篡改防重放签名校验)
+		// 2. 公开业务查询接口
+		api.GET("/coupons", GetCoupons)
+
+		// 3. 鉴权与安全防护核心路由组 (引入 Token 验证、限流、以及防篡改防重放签名校验)
 		protected := api.Group("")
 		protected.Use(core.AuthMiddleware(), core.RateLimitMiddleware(), core.SignAuthMiddleware())
 		{
@@ -35,7 +38,6 @@ func RegisterRoutes(r *gin.Engine) {
 			protected.PUT("/addresses/:id/default", SetDefaultAddress)
 
 			// 优惠券管理
-			protected.GET("/coupons", GetCoupons)
 			protected.GET("/user-coupons", GetUserCoupons)
 			protected.POST("/user-coupons/receive", ReceiveCoupon)
 
