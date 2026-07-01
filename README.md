@@ -2,7 +2,11 @@
 
 > 一个基于 Go 语言构建的轻量级、高性能通用电商后端系统。
 
-本项目旨在提供一个高并发、高可用的电商基础架构。系统支持两种运行形态：默认的“模块化单体 + 前端静态托管”，以及基于 `cmd/goshop-*-service` 的单仓库多进程微服务过渡形态。当前重点攻克了交易一致性、库存预占、支付回调幂等、售后退款和轻量级事件发布。
+本项目旨在提供一个高并发、高可用的电商基础架构。系统支持两种运行形态：
+1. **模块化单体运行时 (Monolith Runtime)**：默认推荐，单进程运行并监听 `:3233` 端口，内置完整的前端静态文件托管（位于 `web/dist`）与后台延迟任务 Worker。
+2. **多进程微服务过渡运行时 (Transitional Multi-Process Microservice Runtime)**：单仓库多进程（Mono-repo, Multi-process）服务形态。9 个核心服务作为独立二进制进程启动，分别运行在 `8101` ~ `8109` 独立端口。由 Caddy 网关（Caddyfile 监听 `:8080`）实现统一的路由分发与前端静态文件代理。在该形态下，所有异步后台 Worker（Outbox 事件发布、订单支付超时释放等）统一由 `goshop-scheduler-service` 调度器服务独立承载，其余 API 服务均为纯粹无状态的 HTTP 服务。
+
+当前重点攻克了交易一致性、库存预占、支付回调幂等、售后退款和轻量级事件发布。
 
 **在线演示：** [https://shop.lzzz.ink](https://shop.lzzz.ink)
 
@@ -122,21 +126,69 @@ cp config.example.yaml config.yaml
 
 ### 5. 微服务过渡形态
 
-当前仓库也提供单机多进程服务入口，适合用 Caddy 按路径反向代理：
+为了平滑演进并降低单体拆分风险，本项目提供了一种单仓库、多进程的微服务过渡运行形态。
 
-```bash
-GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-user-service
-GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-product-service
-GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-order-service
-GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-payment-service
-GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-aftersale-service
-GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-cart-service
-GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-promotion-service
-GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-inventory-service
-GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-scheduler-service
-```
+#### 核心运行特征：
+* **多进程独立端口**：9 个微服务分别监听独立的默认端口（`8101` ~ `8109`），各服务的具体职责及接口映射可见 [docs/microservices.md](docs/microservices.md)。
+* **后台任务集中化**：在微服务形态下，所有异步后台 Worker（Outbox 消息发布器、延迟队列超时释放 Worker）都脱离 HTTP 业务进程，统一在 `goshop-scheduler-service`（`:8109`）中以后台协程方式运行。
+* **Caddy 统一网关分发**：使用 Caddy 网关监听 `:8080` 端口，它不仅代理前端静态文件，还根据请求的 API 前缀将请求反向代理到不同的微服务进程。
+  * *特别提示*：对于高并发秒杀路由 `/api/seckill`，Caddyfile 会将其强制分发给专门的 `goshop-inventory-service`（`:8103`），利用其内存 Lua 脚本预扣库存引擎保护数据库，而订单生成和查询路由则导向 `goshop-order-service`（`:8105`）。
+* **配置覆盖**：每个服务进程启动时，支持以下环境变量配置：
+  * `GOSHOP_CONFIG`：配置文件路径（默认为 `config.yaml`）。
+  * `PORT` 或 `GOSHOP_SERVICE_PORT`：可直接覆盖该进程的监听端口。
+  * 服务特定端口变量：例如 `GOSHOP_USER_PORT` 可以覆盖特定服务的默认端口。
 
-默认端口和 Caddy 路由见 [docs/microservices.md](docs/microservices.md) 与 [deploy/Caddyfile.microservices](deploy/Caddyfile.microservices)。
+#### 启动命令：
+
+1. **方式 A：通过 go run 逐个启动（本地调试）**：
+   ```bash
+   GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-user-service
+   GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-product-service
+   GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-inventory-service
+   GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-promotion-service
+   GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-order-service
+   GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-payment-service
+   GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-aftersale-service
+   GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-cart-service
+   GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-scheduler-service
+   ```
+
+2. **方式 B：编译为二进制并启动**：
+   ```bash
+   mkdir -p bin
+   go build -o bin/goshop-user-service ./cmd/goshop-user-service
+   go build -o bin/goshop-product-service ./cmd/goshop-product-service
+   go build -o bin/goshop-inventory-service ./cmd/goshop-inventory-service
+   go build -o bin/goshop-promotion-service ./cmd/goshop-promotion-service
+   go build -o bin/goshop-order-service ./cmd/goshop-order-service
+   go build -o bin/goshop-payment-service ./cmd/goshop-payment-service
+   go build -o bin/goshop-aftersale-service ./cmd/goshop-aftersale-service
+   go build -o bin/goshop-cart-service ./cmd/goshop-cart-service
+   go build -o bin/goshop-scheduler-service ./cmd/goshop-scheduler-service
+   
+   # 启动示例
+   GOSHOP_CONFIG=config.yaml ./bin/goshop-user-service
+   ```
+
+3. **配置 Caddy 反向代理网关**：
+   使用项目根目录下的 `deploy/Caddyfile.microservices` 启动 Caddy：
+   ```bash
+   caddy run --config deploy/Caddyfile.microservices
+   ```
+   启动后，直接访问网关端口：👉 **[http://localhost:8080](http://localhost:8080)**
+
+默认端口和 Caddy 路由细则详见 [docs/microservices.md](docs/microservices.md) 与 [deploy/Caddyfile.microservices](deploy/Caddyfile.microservices)。
+
+---
+
+## 🛠️ 剩余硬拆分工作 (Remaining Hard-Split Work)
+
+当前微服务为**过渡形态**（共享同一个数据库 Schema、相同的 Valkey 实例、底层 Models 和 Handler 包）。若要升级为完全解耦的生产级微服务，仍需完成以下硬拆分工作：
+
+1. **数据库独立与表拆分**：将各微服务专有表移动到独立的 PostgreSQL Schema 或物理数据库中，为每个微服务配置只拥有自身库/表最小权限的数据库账号。
+2. **跨服务通信改造**：订单服务等目前跨表查询（如查询用户、商品、库存快照）需改写为通过 gRPC / HTTP 接口向相应服务发出请求。
+3. **消息队列升级**：将目前的 Redis Stream 事件总线（Outbox 发布器）升级为 NATS JetStream 或 RabbitMQ 等高吞吐专业消息中间件，并在各消费端补齐 Inbox 幂等消费者。
+4. **商家管理后台与支付系统重构**：剥离出独立的 Admin 前端，接入生产级第三方支付渠道并补充每日财务对账任务。
 
 ---
 

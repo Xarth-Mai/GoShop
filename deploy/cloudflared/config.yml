@@ -1,0 +1,15 @@
+tunnel: goshop-prod
+credentials-file: /etc/cloudflared/goshop-prod.json
+
+ingress:
+  - hostname: shop.example.com
+    service: http://127.0.0.1:8080
+    originRequest:
+      connectTimeout: 10s
+
+  - hostname: admin.shop.example.com
+    service: http://127.0.0.1:8080
+    originRequest:
+      connectTimeout: 10s
+
+  - service: http_status:404
