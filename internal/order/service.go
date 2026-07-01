@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"time"
 
+	"GoShop/core"
 	"GoShop/internal/checkout"
-	"GoShop/internal/inventory"
 	"GoShop/internal/outbox"
-	"GoShop/internal/promotion"
 	"GoShop/models"
 
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -36,14 +36,12 @@ type Detail struct {
 type Service struct {
 	DB        *gorm.DB
 	Checkout  checkout.Service
-	Inventory inventory.Service
 }
 
 func NewService(db *gorm.DB) Service {
 	return Service{
 		DB:        db,
 		Checkout:  checkout.NewService(db),
-		Inventory: inventory.NewService(db),
 	}
 }
 
@@ -65,9 +63,13 @@ func (s Service) CreateOrder(userID uint, req CreateRequest) (CreateResult, erro
 
 		orderID := fmt.Sprintf("GS-%d-%d", time.Now().Unix(), time.Now().Nanosecond()%1000)
 		payExpireAt := time.Now().Add(PendingPaymentTTL)
-		reserveItems := make([]inventory.ReserveItem, 0, len(preview.Items))
+		type InternalReserveItem struct {
+			SkuID int `json:"skuId"`
+			Qty   int `json:"qty"`
+		}
+		items := make([]InternalReserveItem, 0, len(preview.Items))
 		for _, item := range preview.Items {
-			reserveItems = append(reserveItems, inventory.ReserveItem{SkuID: item.SkuID, Quantity: item.Quantity})
+			items = append(items, InternalReserveItem{SkuID: int(item.SkuID), Qty: item.Quantity})
 		}
 
 		orderItems := make([]models.OrderItem, 0, len(preview.Items))
@@ -107,16 +109,30 @@ func (s Service) CreateOrder(userID uint, req CreateRequest) (CreateResult, erro
 			return err
 		}
 		if req.UserCouponID > 0 && preview.SelectedUserCouponID > 0 {
-			discount, err := promotion.NewService(tx).LockCouponForOrder(tx, userID, req.UserCouponID, order.ID, preview.GoodsOriginAmount)
+			var lockResp struct {
+				DiscountAmount int `json:"discountAmount"`
+			}
+			err := core.CallInternalService(tx, 8104, "POST", "/api/internal/promotion/lock", map[string]interface{}{
+				"userId":       userID,
+				"userCouponId": req.UserCouponID,
+				"orderId":      order.ID,
+				"subtotal":     preview.GoodsOriginAmount,
+			}, &lockResp)
 			if err != nil {
 				return err
 			}
-			if discount != preview.GoodsDiscountAmount {
+			if lockResp.DiscountAmount != preview.GoodsDiscountAmount {
 				return fmt.Errorf("优惠券金额已变化，请重新试算")
 			}
 		}
-		if err := inventory.NewService(tx).ReserveStock(tx, order.ID, userID, reserveItems, payExpireAt); err != nil {
-			return err
+
+		err = core.CallInternalService(tx, 8103, "POST", "/api/internal/inventory/reserve", map[string]interface{}{
+			"orderId": order.ID,
+			"userId":  userID,
+			"items":   items,
+		}, nil)
+		if err != nil {
+			return fmt.Errorf("预占库存失败: %v", err)
 		}
 
 		if preview.SelectedUserCouponID > 0 && preview.GoodsDiscountAmount > 0 {
@@ -182,11 +198,18 @@ func (s Service) CancelPendingOrder(orderID, reason string) error {
 		if err := tx.Save(&order).Error; err != nil {
 			return err
 		}
-		if err := promotion.NewService(tx).ReleaseCouponLock(tx, order.UserCouponID, order.ID); err != nil {
-			return err
+		if order.UserCouponID > 0 {
+			if err := core.CallInternalService(tx, 8104, "POST", "/api/internal/promotion/release", map[string]interface{}{
+				"userCouponId": order.UserCouponID,
+				"orderId":      order.ID,
+			}, nil); err != nil {
+				core.Logger.Warn("释放优惠券失败", zap.String("orderId", order.ID), zap.Error(err))
+			}
 		}
-		if err := inventory.NewService(tx).ReleaseOrderReservations(tx, order.ID); err != nil {
-			return err
+		if err := core.CallInternalService(tx, 8103, "POST", "/api/internal/inventory/release", map[string]interface{}{
+			"orderId": order.ID,
+		}, nil); err != nil {
+			core.Logger.Warn("释放预占库存失败", zap.String("orderId", order.ID), zap.Error(err))
 		}
 		if err := appendStateLog(tx, order.ID, fromStatus, models.OrderStatusCanceled, order.UserID, "ORDER_TIMEOUT_CANCELED", reason); err != nil {
 			return err

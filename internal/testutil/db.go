@@ -3,6 +3,7 @@ package testutil
 import (
 	"testing"
 
+	"GoShop/core"
 	"GoShop/models"
 
 	"github.com/glebarez/sqlite"
@@ -48,6 +49,9 @@ func SetupTestDB(t *testing.T) *gorm.DB {
 	if err := models.SeedProducts(db); err != nil {
 		t.Fatalf("Failed to seed data: %v", err)
 	}
+
+	// 绑定单元测试临时数据库连接至 core.DB，实现微服务客户端本地 fallback 连通性
+	core.DB = db
 
 	return db
 }

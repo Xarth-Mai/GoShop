@@ -33,6 +33,8 @@ func RegisterProductServiceRoutes(r *gin.Engine) {
 	api.GET("/categories", GetCategories)
 	api.GET("/products", GetProducts)
 	api.GET("/products/:id", GetProduct)
+
+	RegisterInternalRoutes(r)
 }
 
 func RegisterCartServiceRoutes(r *gin.Engine) {
@@ -50,6 +52,8 @@ func RegisterPromotionServiceRoutes(r *gin.Engine) {
 	protected := protectedAPI(r)
 	protected.GET("/user-coupons", GetUserCoupons)
 	protected.POST("/user-coupons/receive", ReceiveCoupon)
+
+	RegisterInternalRoutes(r)
 }
 
 func RegisterOrderServiceRoutes(r *gin.Engine) {
@@ -82,4 +86,6 @@ func RegisterAfterSaleServiceRoutes(r *gin.Engine) {
 func RegisterInventoryServiceRoutes(r *gin.Engine) {
 	protected := protectedAPI(r)
 	protected.POST("/seckill", Seckill)
+
+	RegisterInternalRoutes(r)
 }

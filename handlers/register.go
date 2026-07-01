@@ -69,4 +69,6 @@ func RegisterRoutes(r *gin.Engine) {
 			}
 		}
 	}
+
+	RegisterInternalRoutes(r)
 }

@@ -215,3 +215,16 @@ func SignAuthMiddleware() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// InternalOnlyMiddleware 内部微服务调用安全拦截中间件
+func InternalOnlyMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		token := c.GetHeader("X-Internal-Token")
+		if token == "" || token != "goshop_internal_communication_secret_token" {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: internal only"})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}

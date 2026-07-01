@@ -155,6 +155,11 @@ func TestCaddyRoutesMatchGoServices(t *testing.T) {
 
 			// 检查 Go 服务的每个路由是否能被 Caddyfile 中对应的匹配路径捕获
 			for _, route := range goRoutes {
+				// 内部微服务调用接口严禁通过 Caddyfile 暴露给外部，在此特判跳过校验
+				if strings.HasPrefix(route.Path, "/api/internal") {
+					continue
+				}
+
 				// 格式化 Gin 的路径占位符
 				testPath := formatGinPath(route.Path)
 

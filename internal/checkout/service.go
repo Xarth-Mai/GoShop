@@ -3,6 +3,7 @@ package checkout
 import (
 	"fmt"
 
+	"GoShop/core"
 	"GoShop/internal/promotion"
 	"GoShop/models"
 
@@ -72,8 +73,9 @@ func (s Service) Calculate(userID uint, req PreviewRequest) (Preview, error) {
 			return Preview{}, fmt.Errorf("商品数量必须大于 0")
 		}
 		var sku models.Sku
-		if err := s.DB.Where("id = ?", item.SkuID).First(&sku).Error; err != nil {
-			return Preview{}, fmt.Errorf("商品规格 ID %d 不存在", item.SkuID)
+		err := core.CallInternalService(s.DB, 8102, "GET", fmt.Sprintf("/api/internal/products/%d", item.SkuID), nil, &sku)
+		if err != nil {
+			return Preview{}, fmt.Errorf("商品规格 ID %d 不存在或服务异常", item.SkuID)
 		}
 		origin := sku.Price * item.Quantity
 		preview.Items = append(preview.Items, ItemPreview{
@@ -116,7 +118,16 @@ func (s Service) Calculate(userID uint, req PreviewRequest) (Preview, error) {
 }
 
 func (s Service) couponCandidates(userID, selectedUserCouponID uint, subtotal int) []CouponCandidate {
-	promotionCandidates := promotion.NewService(s.DB).CouponCandidates(userID, selectedUserCouponID, subtotal)
+	var promotionCandidates []promotion.CouponCandidate
+	err := core.CallInternalService(s.DB, 8104, "POST", "/api/internal/promotion/candidates", map[string]interface{}{
+		"userId":               userID,
+		"selectedUserCouponId": selectedUserCouponID,
+		"subtotal":             subtotal,
+	}, &promotionCandidates)
+	if err != nil {
+		return nil
+	}
+
 	candidates := make([]CouponCandidate, 0, len(promotionCandidates))
 	for _, candidate := range promotionCandidates {
 		candidates = append(candidates, CouponCandidate{
