@@ -27,10 +27,14 @@ func InitDB(serviceName string) error {
 	}
 
 	// 初始化主库
-	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
+		DisableForeignKeyConstraintWhenMigrating: true,
+	})
 	if err != nil {
 		// 降级策略：如果微服务专属库未建立（如本地单库调试），自动降级回退到 master 共享大库
-		DB, err = gorm.Open(postgres.Open(cfg.Master), &gorm.Config{})
+		DB, err = gorm.Open(postgres.Open(cfg.Master), &gorm.Config{
+			DisableForeignKeyConstraintWhenMigrating: true,
+		})
 		if err != nil {
 			return err
 		}
@@ -100,7 +104,9 @@ func InitDB(serviceName string) error {
 
 	// 如果配置了从库，则初始化从库连接
 	if cfg.Replica != "" && cfg.Replica != cfg.Master {
-		ReplicaDB, err = gorm.Open(postgres.Open(cfg.Replica), &gorm.Config{})
+		ReplicaDB, err = gorm.Open(postgres.Open(cfg.Replica), &gorm.Config{
+			DisableForeignKeyConstraintWhenMigrating: true,
+		})
 		if err != nil {
 			return err
 		}

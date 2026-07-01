@@ -3,7 +3,7 @@
     admin off
 }
 
-:8080 {
+:3233 {
     encode zstd gzip
 
     @health path /health
@@ -56,7 +56,7 @@
         }
     }
 
-    @order path /api/checkout/* /api/orders /api/orders/*
+    @order path /api/checkout/* /api/orders /api/orders/* /api/metrics
     handle @order {
         reverse_proxy 127.0.0.1:8105 {
             health_uri /health

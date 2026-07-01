@@ -68,6 +68,8 @@ func RegisterOrderServiceRoutes(r *gin.Engine) {
 	protected.GET("/orders/:id", GetOrderDetail)
 	protected.POST("/seckill", Seckill)
 
+	r.GET("/api/metrics", GetMetrics)
+
 	RegisterInternalRoutes(r)
 }
 

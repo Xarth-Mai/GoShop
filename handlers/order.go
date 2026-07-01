@@ -780,3 +780,86 @@ func Seckill(c *gin.Context) {
 		"orderId": orderID,
 	})
 }
+
+// GetMetrics 看板专属指标与日志同步 API
+func GetMetrics(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	// 获取秒杀商品缓存库存数
+	var stock int
+	if core.RedisClient != nil {
+		stockStr, err := core.RedisClient.Get(ctx, "seckill:stock:1").Result()
+		if err != nil {
+			core.RedisClient.Set(ctx, "seckill:stock:1", 87, 0)
+			stockStr = "87"
+		}
+		stock, _ = strconv.Atoi(stockStr)
+	}
+
+	// 延迟锁库存计数
+	var lockStock int64 = 0
+	if core.RedisClient != nil {
+		oldDelayCount, _ := core.RedisClient.ZCard(ctx, "seckill:delay_queue").Result()
+		oldProcessingCount, _ := core.RedisClient.ZCard(ctx, "seckill:delay_queue:processing").Result()
+		newDelayCount, _ := core.RedisClient.ZCard(ctx, "delay:order_payment_timeout").Result()
+		newProcessingCount, _ := core.RedisClient.ZCard(ctx, "delay:order_payment_timeout:processing").Result()
+		lockStock = oldDelayCount + oldProcessingCount + newDelayCount + newProcessingCount
+	}
+
+	// 已支付订单总额及销售额
+	var ordersPaid int64 = 0
+	var totalRevenueCent int64 = 0
+
+	if core.DB != nil {
+		core.DB.Model(&models.Order{}).Where("status = ?", models.OrderStatusPaid).Count(&ordersPaid)
+		core.DB.Model(&models.Order{}).Where("status = ?", models.OrderStatusPaid).Select("COALESCE(SUM(total_amount), 0)").Row().Scan(&totalRevenueCent)
+	}
+
+	revenueVal := float64(totalRevenueCent) / 100.0
+	revenueStr := formatCurrency(revenueVal)
+
+	// 获取日志记录
+	var logs []LogItem
+	if core.RedisClient != nil {
+		logStrs, _ := core.RedisClient.LRange(ctx, "seckill:logs", 0, -1).Result()
+		for _, s := range logStrs {
+			var item LogItem
+			if err := json.Unmarshal([]byte(s), &item); err == nil {
+				logs = append(logs, item)
+			}
+		}
+	}
+
+	// 获取待支付订单 (status = 10)
+	var pendingOrders []models.Order
+	if core.DB != nil {
+		core.DB.Where("status = ?", models.OrderStatusPendingPayment).Order("created_at desc").Find(&pendingOrders)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"metrics": gin.H{
+			"seckillStock": stock,
+			"lockStock":    lockStock,
+			"ordersPaid":   ordersPaid,
+			"revenue":      revenueStr,
+		},
+		"logs":          logs,
+		"pendingOrders": pendingOrders,
+	})
+}
+
+func formatCurrency(val float64) string {
+	s := fmt.Sprintf("%.2f", val)
+	parts := strings.Split(s, ".")
+	integer := parts[0]
+	fraction := parts[1]
+
+	var result []string
+	for i, c := range integer {
+		if i > 0 && (len(integer)-i)%3 == 0 {
+			result = append(result, ",")
+		}
+		result = append(result, string(c))
+	}
+	return strings.Join(result, "") + "." + fraction
+}
