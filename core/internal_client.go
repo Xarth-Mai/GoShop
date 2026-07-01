@@ -76,7 +76,7 @@ func fallbackLocal(db *gorm.DB, targetPort int, method, path string, reqBody int
 	}
 
 	// 1. 商品服务降级 (GET /api/internal/products/:id)
-	if targetPort == 8102 && method == "GET" && strings.HasPrefix(path, "/api/internal/products/") {
+	if targetPort == 8102 && method == "GET" && strings.HasPrefix(path, "/api/internal/products/") && !strings.HasSuffix(path, "/cart-summary") {
 		parts := strings.Split(path, "/")
 		idStr := parts[len(parts)-1]
 		id, err := strconv.Atoi(idStr)
@@ -88,6 +88,49 @@ func fallbackLocal(db *gorm.DB, targetPort int, method, path string, reqBody int
 			return fmt.Errorf("invalid dest type for product fallback")
 		}
 		return db.Where("id = ?", id).First(destSku).Error
+	}
+
+	if targetPort == 8102 && method == "GET" && strings.HasPrefix(path, "/api/internal/products/") && strings.HasSuffix(path, "/cart-summary") {
+		parts := strings.Split(path, "/")
+		if len(parts) < 2 {
+			return fmt.Errorf("invalid product summary path")
+		}
+		idStr := parts[len(parts)-2]
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			return err
+		}
+
+		var sku models.Sku
+		if err := db.Where("id = ?", id).First(&sku).Error; err != nil {
+			return err
+		}
+
+		var spu models.Spu
+		if err := db.Where("id = ?", sku.SpuID).First(&spu).Error; err != nil {
+			return err
+		}
+
+		summary := struct {
+			SkuID   uint   `json:"skuId"`
+			SpuID   uint   `json:"spuId"`
+			SpuName string `json:"spuName"`
+			SkuName string `json:"skuName"`
+			Price   int    `json:"price"`
+			Image   string `json:"image"`
+		}{
+			SkuID:   sku.ID,
+			SpuID:   sku.SpuID,
+			SpuName: spu.Name,
+			SkuName: sku.Title,
+			Price:   sku.Price,
+			Image:   spu.MainImage,
+		}
+		raw, err := json.Marshal(summary)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(raw, respDest)
 	}
 
 	// 2. 优惠券 Candidates 降级 (POST /api/internal/promotion/candidates)
@@ -324,13 +367,13 @@ func fallbackLocal(db *gorm.DB, targetPort int, method, path string, reqBody int
 				}
 
 				res := models.InventoryReservation{
-					ID:        fmt.Sprintf("RES-%s-%d", orderID, skuID),
-					OrderID:   orderID,
-					UserID:    userID,
-					SkuID:     skuID,
-					Quantity:  qty,
-					Status:    models.ReservationStatusReserved,
-					ExpireAt:  time.Now().Add(30 * time.Minute),
+					ID:       fmt.Sprintf("RES-%s-%d", orderID, skuID),
+					OrderID:  orderID,
+					UserID:   userID,
+					SkuID:    skuID,
+					Quantity: qty,
+					Status:   models.ReservationStatusReserved,
+					ExpireAt: time.Now().Add(30 * time.Minute),
 				}
 				if err := tx.Create(&res).Error; err != nil {
 					return err

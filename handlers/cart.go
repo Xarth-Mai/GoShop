@@ -24,6 +24,28 @@ type CartSyncReq struct {
 	Items []SyncItem `json:"items" binding:"required"`
 }
 
+type cartProductSummary struct {
+	SkuID   uint   `json:"skuId"`
+	SpuID   uint   `json:"spuId"`
+	SpuName string `json:"spuName"`
+	SkuName string `json:"skuName"`
+	Price   int    `json:"price"`
+	Image   string `json:"image"`
+}
+
+func fetchCartProductSummary(skuID uint) (cartProductSummary, error) {
+	var summary cartProductSummary
+	err := core.CallInternalService(
+		core.DB,
+		8102,
+		http.MethodGet,
+		"/api/internal/products/"+strconv.Itoa(int(skuID))+"/cart-summary",
+		nil,
+		&summary,
+	)
+	return summary, err
+}
+
 // GetCart 获取当前用户的云端购物车
 // @Summary 获取购物车
 // @Tags cart
@@ -44,7 +66,7 @@ func GetCart(c *gin.Context) {
 	}
 
 	var dbItems []models.CartItem
-	if err := core.ReplicaDB.Preload("Sku").Where("user_id = ?", userID).Find(&dbItems).Error; err != nil {
+	if err := core.ReplicaDB.Where("user_id = ?", userID).Find(&dbItems).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "获取购物车失败: " + err.Error()})
 		return
 	}
@@ -62,19 +84,18 @@ func GetCart(c *gin.Context) {
 
 	var responseList []ResponseCartItem
 	for _, item := range dbItems {
-		// 查询关联的 SPU 详情
-		var spu models.Spu
-		if err := core.ReplicaDB.Where("id = ?", item.Sku.SpuID).First(&spu).Error; err != nil {
+		summary, err := fetchCartProductSummary(item.SkuID)
+		if err != nil {
 			continue
 		}
 		responseList = append(responseList, ResponseCartItem{
 			SkuID:    item.SkuID,
-			SpuID:    item.Sku.SpuID,
-			SpuName:  spu.Name,
-			SkuName:  item.Sku.Title,
-			Price:    item.Sku.Price,
+			SpuID:    summary.SpuID,
+			SpuName:  summary.SpuName,
+			SkuName:  summary.SkuName,
+			Price:    summary.Price,
 			Quantity: item.Quantity,
-			Image:    spu.MainImage,
+			Image:    summary.Image,
 		})
 	}
 
@@ -108,9 +129,7 @@ func AddOrUpdateCart(c *gin.Context) {
 		return
 	}
 
-	// 校验 SKU 是否存在
-	var sku models.Sku
-	if err := core.ReplicaDB.Where("id = ?", req.SkuID).First(&sku).Error; err != nil {
+	if _, err := fetchCartProductSummary(req.SkuID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "商品规格不存在"})
 		return
 	}
@@ -200,6 +219,13 @@ func SyncCart(c *gin.Context) {
 	if core.DB == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "数据库未就绪"})
 		return
+	}
+
+	for _, item := range req.Items {
+		if _, err := fetchCartProductSummary(item.SkuID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "商品规格不存在"})
+			return
+		}
 	}
 
 	tx := core.DB.Begin()

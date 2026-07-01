@@ -24,6 +24,25 @@ func TestCallInternalService_Fallback(t *testing.T) {
 		}
 	})
 
+	t.Run("Product Cart Summary Fallback", func(t *testing.T) {
+		var summary struct {
+			SkuID   uint   `json:"skuId"`
+			SpuID   uint   `json:"spuId"`
+			SpuName string `json:"spuName"`
+			SkuName string `json:"skuName"`
+			Price   int    `json:"price"`
+			Image   string `json:"image"`
+		}
+
+		err := core.CallInternalService(db, 8102, "GET", "/api/internal/products/1/cart-summary", nil, &summary)
+		if err != nil {
+			t.Fatalf("product cart summary fallback failed: %v", err)
+		}
+		if summary.SkuID != 1 || summary.SpuID != 1 || summary.SpuName == "" || summary.SkuName == "" || summary.Price == 0 {
+			t.Fatalf("unexpected product summary: %+v", summary)
+		}
+	})
+
 	// 2. 优惠券 Candidates 降级验证 (POST /api/internal/promotion/candidates)
 	t.Run("Promotion Candidates Fallback", func(t *testing.T) {
 		// 往测试库插入一张可用优惠券关联

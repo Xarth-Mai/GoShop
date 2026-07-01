@@ -21,6 +21,7 @@ func RegisterInternalRoutes(r *gin.Engine) {
 	{
 		// 1. 商品服务接口
 		internal.GET("/products/:id", internalGetProductSku)
+		internal.GET("/products/:id/cart-summary", internalGetProductCartSummary)
 
 		// 2. 库存服务接口
 		internal.POST("/inventory/reserve", internalReserveStock)
@@ -51,6 +52,45 @@ func internalGetProductSku(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, sku)
+}
+
+type InternalProductCartSummary struct {
+	SkuID   uint   `json:"skuId"`
+	SpuID   uint   `json:"spuId"`
+	SpuName string `json:"spuName"`
+	SkuName string `json:"skuName"`
+	Price   int    `json:"price"`
+	Image   string `json:"image"`
+}
+
+func internalGetProductCartSummary(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sku id"})
+		return
+	}
+
+	var sku models.Sku
+	if err := core.ReplicaDB.Where("id = ?", id).First(&sku).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "sku not found"})
+		return
+	}
+
+	var spu models.Spu
+	if err := core.ReplicaDB.Where("id = ?", sku.SpuID).First(&spu).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "spu not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, InternalProductCartSummary{
+		SkuID:   sku.ID,
+		SpuID:   sku.SpuID,
+		SpuName: spu.Name,
+		SkuName: sku.Title,
+		Price:   sku.Price,
+		Image:   spu.MainImage,
+	})
 }
 
 // ----------------------------------------------------
