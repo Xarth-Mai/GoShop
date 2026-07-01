@@ -25,9 +25,6 @@ func InitDB() error {
 	if err != nil {
 		return err
 	}
-	if err := migrateLegacyOrderStatuses(DB); err != nil {
-		return err
-	}
 
 	// 数据库自动迁移
 	err = DB.AutoMigrate(
@@ -45,6 +42,9 @@ func InitDB() error {
 		&models.AccountingEntry{},
 		&models.AfterSaleOrder{},
 		&models.AfterSaleItem{},
+		&models.SkuInventory{},
+		&models.InventoryReservation{},
+		&models.InventoryJournal{},
 		&models.Address{},
 		&models.Coupon{},
 		&models.UserCoupon{},
@@ -52,6 +52,9 @@ func InitDB() error {
 		&models.DeadLetterOrder{},
 	)
 	if err != nil {
+		return err
+	}
+	if err := migrateLegacyOrderStatuses(DB); err != nil {
 		return err
 	}
 

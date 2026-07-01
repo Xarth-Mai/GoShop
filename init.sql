@@ -259,6 +259,45 @@ CREATE TABLE IF NOT EXISTS after_sale_items (
 );
 CREATE INDEX IF NOT EXISTS idx_after_sale_items_after_sale_id ON after_sale_items(after_sale_id);
 
+CREATE TABLE IF NOT EXISTS sku_inventories (
+    sku_id INTEGER PRIMARY KEY REFERENCES skus(id),
+    available INTEGER NOT NULL,
+    reserved INTEGER NOT NULL DEFAULT 0,
+    sold INTEGER NOT NULL DEFAULT 0,
+    version INTEGER NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS inventory_reservations (
+    id VARCHAR(64) PRIMARY KEY,
+    order_id VARCHAR(64) NOT NULL REFERENCES orders(id),
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    sku_id INTEGER NOT NULL REFERENCES skus(id),
+    quantity INTEGER NOT NULL,
+    status INTEGER NOT NULL,
+    expire_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(order_id, sku_id)
+);
+CREATE INDEX IF NOT EXISTS idx_inventory_reservations_user_id ON inventory_reservations(user_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_reservations_sku_id ON inventory_reservations(sku_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_reservations_status ON inventory_reservations(status);
+CREATE INDEX IF NOT EXISTS idx_inventory_reservations_expire_at ON inventory_reservations(expire_at);
+
+CREATE TABLE IF NOT EXISTS inventory_journals (
+    id SERIAL PRIMARY KEY,
+    sku_id INTEGER NOT NULL REFERENCES skus(id),
+    order_id VARCHAR(64),
+    reservation_id VARCHAR(64),
+    change_type VARCHAR(64) NOT NULL,
+    quantity INTEGER NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_inventory_journals_sku_id ON inventory_journals(sku_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_journals_order_id ON inventory_journals(order_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_journals_reservation_id ON inventory_journals(reservation_id);
+
 CREATE TABLE IF NOT EXISTS dead_letter_orders (
     id SERIAL PRIMARY KEY,
     order_id VARCHAR(64) NOT NULL UNIQUE,

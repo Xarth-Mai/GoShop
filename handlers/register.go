@@ -49,6 +49,7 @@ func RegisterRoutes(r *gin.Engine) {
 			protected.POST("/cart/sync", SyncCart)
 
 			// 订单管理
+			protected.POST("/checkout/preview", PreviewCheckout)
 			protected.POST("/orders", CreateOrder)
 			protected.GET("/orders", GetOrders)
 			protected.POST("/orders/:id/refund", ApplyRefund)

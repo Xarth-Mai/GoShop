@@ -43,7 +43,9 @@ func ExportMetrics(c *gin.Context) {
 	if RedisClient != nil {
 		l1, _ := RedisClient.ZCard(ctx, "seckill:delay_queue").Result()
 		l2, _ := RedisClient.ZCard(ctx, "seckill:delay_queue:processing").Result()
-		queueLength = l1 + l2
+		l3, _ := RedisClient.ZCard(ctx, "delay:order_payment_timeout").Result()
+		l4, _ := RedisClient.ZCard(ctx, "delay:order_payment_timeout:processing").Result()
+		queueLength = l1 + l2 + l3 + l4
 	}
 
 	// 2. 计算平均耗时 (秒)

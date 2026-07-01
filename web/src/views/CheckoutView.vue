@@ -18,6 +18,8 @@ const addresses = ref<any[]>([])
 const selectedAddress = ref<any | null>(null)
 const userCoupons = ref<any[]>([])
 const selectedCoupon = ref<any | null>(null)
+const pricePreview = ref<any | null>(null)
+const previewLoading = ref(false)
 
 const loading = ref(false)
 const orderCompleted = ref(false)
@@ -150,35 +152,44 @@ const autoSelectBestCoupon = () => {
   selectedCoupon.value = bestCoupon
 }
 
-// Calculate price variables
-const shippingFee = computed(() => {
-  return subtotal.value >= 9900 ? 0 : 1000 // 99元起包邮
+const previewItemsKey = computed(() => {
+  return items.value.map(i => `${i.skuId}:${i.quantity}`).join('|')
 })
 
-const taxFee = computed(() => {
-  return Math.round(subtotal.value * 0.05) // 5% 增值税率
-})
-
-const discountAmount = computed(() => {
-  if (!selectedCoupon.value) return 0
-  const cp = selectedCoupon.value.coupon
-  let val = 0
-  switch (cp.type) {
-    case 1:
-    case 3:
-      val = cp.value
-      break
-    case 2:
-      val = subtotal.value * (100 - cp.value) / 100
-      break
+const fetchCheckoutPreview = async () => {
+  if (!selectedAddress.value || items.value.length === 0) {
+    pricePreview.value = null
+    return
   }
-  return val > subtotal.value ? subtotal.value : val
-})
 
-const payableAmount = computed(() => {
-  const total = subtotal.value + shippingFee.value + taxFee.value - discountAmount.value
-  return total < 0 ? 0 : total
-})
+  previewLoading.value = true
+  try {
+    const res = await signedFetch('/api/checkout/preview', {
+      method: 'POST',
+      body: JSON.stringify({
+        items: items.value.map(i => ({ skuId: i.skuId, quantity: i.quantity })),
+        addressId: selectedAddress.value.id,
+        userCouponId: selectedCoupon.value ? selectedCoupon.value.id : 0
+      })
+    })
+    if (res.ok) {
+      pricePreview.value = await res.json()
+    } else {
+      pricePreview.value = null
+    }
+  } catch (err) {
+    console.error('结算试算失败:', err)
+    pricePreview.value = null
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+const goodsOriginAmount = computed(() => pricePreview.value?.goodsOriginAmount ?? subtotal.value)
+const shippingFee = computed(() => pricePreview.value?.shippingFee ?? 0)
+const taxFee = computed(() => pricePreview.value?.taxFee ?? 0)
+const discountAmount = computed(() => pricePreview.value?.goodsDiscountAmount ?? 0)
+const payableAmount = computed(() => pricePreview.value?.payableAmount ?? subtotal.value)
 
 // Save address to database (transparently encrypted on GORM save)
 const saveAddress = async () => {
@@ -241,6 +252,10 @@ const handlePay = async () => {
     alert('请添加并选择收货地址')
     return
   }
+  if (!pricePreview.value) {
+    alert('后端价格试算尚未完成，请稍后再提交订单')
+    return
+  }
 
   loading.value = true
 
@@ -296,6 +311,13 @@ onMounted(() => {
   fetchAddresses()
   fetchCoupons()
 })
+
+watch(
+  () => [selectedAddress.value?.id, selectedCoupon.value?.id, previewItemsKey.value],
+  () => {
+    fetchCheckoutPreview()
+  }
+)
 </script>
 
 <template>
@@ -367,6 +389,9 @@ onMounted(() => {
           <p class="optimal-hint-text" v-if="selectedCoupon">
             已自动匹配最优组合，本次为您节省 ¥{{ (discountAmount/100).toFixed(2) }}
           </p>
+          <p class="optimal-hint-text" v-if="previewLoading">
+            正在向后端确认最终价格...
+          </p>
         </Card>
       </div>
 
@@ -385,7 +410,7 @@ onMounted(() => {
           <div class="price-summary">
             <div class="summary-row">
               <span>商品小计</span>
-              <span>¥{{ (subtotal / 100).toFixed(2) }}</span>
+              <span>¥{{ (goodsOriginAmount / 100).toFixed(2) }}</span>
             </div>
             <div class="summary-row" v-if="discountAmount > 0">
               <span>卡券折减</span>
@@ -405,7 +430,7 @@ onMounted(() => {
             </div>
           </div>
 
-          <Button @click="handlePay" :loading="loading" variant="primary" class="pay-btn">
+          <Button @click="handlePay" :loading="loading || previewLoading" variant="primary" class="pay-btn" :disabled="!pricePreview">
             立即支付 (¥{{ (payableAmount / 100).toFixed(2) }})
           </Button>
         </Card>

@@ -192,7 +192,11 @@ func main() {
 		stock, _ := strconv.Atoi(stockStr)
 
 		// 延迟锁库存计数
-		lockStock, _ := core.RedisClient.ZCard(ctx, "seckill:delay_queue").Result()
+		oldDelayCount, _ := core.RedisClient.ZCard(ctx, "seckill:delay_queue").Result()
+		oldProcessingCount, _ := core.RedisClient.ZCard(ctx, "seckill:delay_queue:processing").Result()
+		newDelayCount, _ := core.RedisClient.ZCard(ctx, "delay:order_payment_timeout").Result()
+		newProcessingCount, _ := core.RedisClient.ZCard(ctx, "delay:order_payment_timeout:processing").Result()
+		lockStock := oldDelayCount + oldProcessingCount + newDelayCount + newProcessingCount
 
 		// 已支付订单总额及销售额
 		var ordersPaid int64 = 0
@@ -327,11 +331,24 @@ func main() {
 		core.RedisClient.Set(ctx, "seckill:stock:1", 87, 0)
 		core.RedisClient.Del(ctx, "seckill:delay_queue")
 		core.RedisClient.Del(ctx, "seckill:delay_queue:processing")
+		core.RedisClient.Del(ctx, "delay:order_payment_timeout")
+		core.RedisClient.Del(ctx, "delay:order_payment_timeout:processing")
 		core.RedisClient.Del(ctx, "seckill:logs")
 
 		// 删除测试生成的普通与秒杀演示订单
 		if core.DB != nil {
+			core.DB.Where("order_id LIKE ? OR order_id LIKE ?", "GS-%", "SK-%").Delete(&models.OrderPromotionAllocation{})
+			core.DB.Where("order_id LIKE ? OR order_id LIKE ?", "GS-%", "SK-%").Delete(&models.OrderStateLog{})
+			core.DB.Where("payment_order_id LIKE ?", "PAY-%").Delete(&models.PaymentTransaction{})
+			core.DB.Where("order_id LIKE ? OR order_id LIKE ?", "GS-%", "SK-%").Delete(&models.RefundOrder{})
+			core.DB.Where("biz_id LIKE ? OR biz_id LIKE ?", "PAY-GS-%", "PAY-SK-%").Delete(&models.AccountingEntry{})
+			core.DB.Where("biz_id LIKE ? OR biz_id LIKE ?", "REF-GS-%", "REF-SK-%").Delete(&models.AccountingEntry{})
+			core.DB.Where("after_sale_id LIKE ? OR after_sale_id LIKE ?", "AS-GS-%", "AS-SK-%").Delete(&models.AfterSaleItem{})
+			core.DB.Where("order_id LIKE ? OR order_id LIKE ?", "GS-%", "SK-%").Delete(&models.AfterSaleOrder{})
+			core.DB.Where("order_id LIKE ? OR order_id LIKE ?", "GS-%", "SK-%").Delete(&models.PaymentOrder{})
 			core.DB.Where("order_id LIKE ? OR order_id LIKE ?", "GS-%", "SK-%").Delete(&models.OrderItem{})
+			core.DB.Where("order_id LIKE ? OR order_id LIKE ?", "GS-%", "SK-%").Delete(&models.InventoryJournal{})
+			core.DB.Where("order_id LIKE ? OR order_id LIKE ?", "GS-%", "SK-%").Delete(&models.InventoryReservation{})
 			core.DB.Where("id LIKE ? OR id LIKE ?", "GS-%", "SK-%").Delete(&models.Order{})
 			core.DB.Where("order_id LIKE ? OR order_id LIKE ?", "GS-%", "SK-%").Delete(&models.DeadLetterOrder{})
 			// 恢复所有的卡券和购物车
