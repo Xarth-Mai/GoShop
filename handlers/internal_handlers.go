@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // RegisterInternalRoutes 注册微服务间安全同步通信接口
@@ -25,10 +27,15 @@ func RegisterInternalRoutes(r *gin.Engine) {
 
 		// 1.5 订单服务接口
 		internal.GET("/orders/:id/payment-source", internalGetOrderPaymentSource)
+		internal.GET("/orders/:id/refund-source", internalGetOrderRefundSource)
+		internal.POST("/orders/:id/refund-apply", internalApplyOrderRefund)
+		internal.POST("/orders/:id/refund-complete", internalCompleteOrderRefund)
+		internal.POST("/orders/:id/refund-reject", internalRejectOrderRefund)
 
 		// 2. 库存服务接口
 		internal.POST("/inventory/reserve", internalReserveStock)
 		internal.POST("/inventory/release", internalReleaseStock)
+		internal.POST("/inventory/restock", internalRestockStock)
 
 		// 3. 优惠券/营销服务接口
 		internal.POST("/promotion/lock", internalLockCoupon)
@@ -76,6 +83,26 @@ type InternalOrderPaymentSource struct {
 	PayExpireAt  *time.Time `json:"payExpireAt,omitempty"`
 }
 
+type InternalOrderRefundItem struct {
+	OrderItemID     uint `json:"orderItemId"`
+	SkuID           uint `json:"skuId"`
+	Quantity        int  `json:"quantity"`
+	PayableAmount   int  `json:"payableAmount"`
+	RefundedAmount  int  `json:"refundedAmount"`
+	RefundableQty   int  `json:"refundableQuantity"`
+	RefundableValue int  `json:"refundableAmount"`
+}
+
+type InternalOrderRefundSource struct {
+	OrderID         string                    `json:"orderId"`
+	UserID          uint                      `json:"userId"`
+	TotalAmount     int                       `json:"totalAmount"`
+	Status          int                       `json:"status"`
+	PayStatus       int                       `json:"payStatus"`
+	AfterSaleStatus int                       `json:"afterSaleStatus"`
+	Items           []InternalOrderRefundItem `json:"items"`
+}
+
 func internalGetOrderPaymentSource(c *gin.Context) {
 	orderID := c.Param("id")
 	userIDValue := uint(0)
@@ -108,6 +135,218 @@ func internalGetOrderPaymentSource(c *gin.Context) {
 		UserCouponID: order.UserCouponID,
 		PayExpireAt:  order.PayExpireAt,
 	})
+}
+
+func internalGetOrderRefundSource(c *gin.Context) {
+	orderID := c.Param("id")
+	userIDValue := uint(0)
+	if userIDRaw := c.Query("userId"); userIDRaw != "" {
+		userID, err := strconv.Atoi(userIDRaw)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
+			return
+		}
+		userIDValue = uint(userID)
+	}
+
+	query := core.ReplicaDB.Preload("Items").Where("id = ?", orderID)
+	if userIDValue > 0 {
+		query = query.Where("user_id = ?", userIDValue)
+	}
+
+	var order models.Order
+	if err := query.First(&order).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
+		return
+	}
+
+	items := make([]InternalOrderRefundItem, 0, len(order.Items))
+	for _, item := range order.Items {
+		refundable := item.PayableAmount - item.RefundedAmount
+		if refundable < 0 {
+			refundable = 0
+		}
+		refundableQty := 0
+		if item.Quantity > 0 && item.PayableAmount > 0 && refundable > 0 {
+			refundableQty = refundable * item.Quantity / item.PayableAmount
+			if refundableQty <= 0 {
+				refundableQty = 1
+			}
+		}
+		items = append(items, InternalOrderRefundItem{
+			OrderItemID:     item.ID,
+			SkuID:           item.SkuID,
+			Quantity:        item.Quantity,
+			PayableAmount:   item.PayableAmount,
+			RefundedAmount:  item.RefundedAmount,
+			RefundableQty:   refundableQty,
+			RefundableValue: refundable,
+		})
+	}
+
+	c.JSON(http.StatusOK, InternalOrderRefundSource{
+		OrderID:         order.ID,
+		UserID:          order.UserID,
+		TotalAmount:     order.TotalAmount,
+		Status:          order.Status,
+		PayStatus:       order.PayStatus,
+		AfterSaleStatus: order.AfterSaleStatus,
+		Items:           items,
+	})
+}
+
+type InternalOrderRefundApplyReq struct {
+	UserID uint   `json:"userId"`
+	Reason string `json:"reason"`
+	Proof  string `json:"proof"`
+}
+
+func internalApplyOrderRefund(c *gin.Context) {
+	orderID := c.Param("id")
+	var req InternalOrderRefundApplyReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	err := core.DB.Transaction(func(tx *gorm.DB) error {
+		var order models.Order
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&order, "id = ? AND user_id = ?", orderID, req.UserID).Error; err != nil {
+			return err
+		}
+		if order.Status != models.OrderStatusPaid || (order.PayStatus != models.PayStatusPaid && order.PayStatus != models.PayStatusPartialRefunded) {
+			return fmt.Errorf("该订单当前状态不支持申请退款")
+		}
+		fromStatus := order.Status
+		order.Status = models.OrderStatusRefundApplying
+		order.AfterSaleStatus = models.AfterSaleStatusApplying
+		order.RefundReason = req.Reason
+		order.RefundProof = req.Proof
+		if err := tx.Save(&order).Error; err != nil {
+			return err
+		}
+		return tx.Create(&models.OrderStateLog{
+			OrderID:      order.ID,
+			FromStatus:   fromStatus,
+			ToStatus:     models.OrderStatusRefundApplying,
+			OperatorType: 1,
+			OperatorID:   req.UserID,
+			Event:        "AFTERSALE_APPLIED",
+			Remark:       req.Reason,
+		}).Error
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "success"})
+}
+
+type InternalOrderRefundCompleteItem struct {
+	OrderItemID uint `json:"orderItemId"`
+	Amount      int  `json:"amount"`
+}
+
+type InternalOrderRefundCompleteReq struct {
+	Items  []InternalOrderRefundCompleteItem `json:"items"`
+	Remark string                            `json:"remark"`
+}
+
+func internalCompleteOrderRefund(c *gin.Context) {
+	orderID := c.Param("id")
+	var req InternalOrderRefundCompleteReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	err := core.DB.Transaction(func(tx *gorm.DB) error {
+		var order models.Order
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&order, "id = ?", orderID).Error; err != nil {
+			return err
+		}
+		if order.AfterSaleStatus == models.AfterSaleStatusRefunded && (order.PayStatus == models.PayStatusRefunded || order.PayStatus == models.PayStatusPartialRefunded) {
+			return nil
+		}
+		for _, item := range req.Items {
+			result := tx.Model(&models.OrderItem{}).
+				Where("id = ? AND order_id = ? AND refunded_amount + ? <= payable_amount", item.OrderItemID, orderID, item.Amount).
+				Update("refunded_amount", gorm.Expr("refunded_amount + ?", item.Amount))
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return fmt.Errorf("订单行 %d 可退金额不足", item.OrderItemID)
+			}
+		}
+
+		var totalRefunded int64
+		if err := tx.Model(&models.OrderItem{}).
+			Where("order_id = ?", orderID).
+			Select("COALESCE(SUM(refunded_amount), 0)").
+			Scan(&totalRefunded).Error; err != nil {
+			return err
+		}
+		fromStatus := order.Status
+		if int(totalRefunded) >= order.TotalAmount {
+			order.Status = models.OrderStatusRefunded
+			order.PayStatus = models.PayStatusRefunded
+		} else {
+			order.Status = models.OrderStatusPaid
+			order.PayStatus = models.PayStatusPartialRefunded
+		}
+		order.AfterSaleStatus = models.AfterSaleStatusRefunded
+		if err := tx.Save(&order).Error; err != nil {
+			return err
+		}
+		return tx.Create(&models.OrderStateLog{
+			OrderID:      order.ID,
+			FromStatus:   fromStatus,
+			ToStatus:     order.Status,
+			OperatorType: 1,
+			OperatorID:   0,
+			Event:        "AFTERSALE_APPROVED",
+			Remark:       req.Remark,
+		}).Error
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "success"})
+}
+
+func internalRejectOrderRefund(c *gin.Context) {
+	orderID := c.Param("id")
+	err := core.DB.Transaction(func(tx *gorm.DB) error {
+		var order models.Order
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&order, "id = ?", orderID).Error; err != nil {
+			return err
+		}
+		if order.AfterSaleStatus == models.AfterSaleStatusRejected {
+			return nil
+		}
+		fromStatus := order.Status
+		order.Status = models.OrderStatusRefundRejected
+		order.AfterSaleStatus = models.AfterSaleStatusRejected
+		if err := tx.Save(&order).Error; err != nil {
+			return err
+		}
+		return tx.Create(&models.OrderStateLog{
+			OrderID:      order.ID,
+			FromStatus:   fromStatus,
+			ToStatus:     models.OrderStatusRefundRejected,
+			OperatorType: 1,
+			OperatorID:   0,
+			Event:        "AFTERSALE_REJECTED",
+			Remark:       "商家拒绝退款申请",
+		}).Error
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "success"})
 }
 
 func internalGetProductCartSummary(c *gin.Context) {
@@ -206,6 +445,44 @@ func internalReleaseStock(c *gin.Context) {
 		return svc.ReleaseOrderReservations(tx, req.OrderID)
 	})
 
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "success"})
+}
+
+type InternalRestockItem struct {
+	SkuID    uint `json:"skuId"`
+	Quantity int  `json:"quantity"`
+}
+
+type InternalRestockStockReq struct {
+	OrderID string                `json:"orderId"`
+	Items   []InternalRestockItem `json:"items"`
+}
+
+func internalRestockStock(c *gin.Context) {
+	var req InternalRestockStockReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.OrderID == "" || len(req.Items) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing orderId or items"})
+		return
+	}
+
+	items := make([]inventory.RestockItem, 0, len(req.Items))
+	for _, item := range req.Items {
+		items = append(items, inventory.RestockItem{SkuID: item.SkuID, Quantity: item.Quantity})
+	}
+
+	err := core.DB.Transaction(func(tx *gorm.DB) error {
+		svc := inventory.NewService(tx)
+		return svc.RestockItemsForOrder(tx, req.OrderID, items)
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"GoShop/internal/inventory"
+	"GoShop/core"
 	"GoShop/internal/outbox"
 	"GoShop/internal/payment"
 	"GoShop/models"
@@ -30,18 +30,37 @@ type AuditRequest struct {
 }
 
 type Service struct {
-	DB        *gorm.DB
-	Inventory inventory.Service
+	DB *gorm.DB
 }
 
 func NewService(db *gorm.DB) Service {
-	return Service{DB: db, Inventory: inventory.NewService(db)}
+	return Service{DB: db}
+}
+
+type orderRefundSource struct {
+	OrderID         string            `json:"orderId"`
+	UserID          uint              `json:"userId"`
+	TotalAmount     int               `json:"totalAmount"`
+	Status          int               `json:"status"`
+	PayStatus       int               `json:"payStatus"`
+	AfterSaleStatus int               `json:"afterSaleStatus"`
+	Items           []orderRefundItem `json:"items"`
+}
+
+type orderRefundItem struct {
+	OrderItemID      uint `json:"orderItemId"`
+	SkuID            uint `json:"skuId"`
+	Quantity         int  `json:"quantity"`
+	PayableAmount    int  `json:"payableAmount"`
+	RefundedAmount   int  `json:"refundedAmount"`
+	RefundableQty    int  `json:"refundableQuantity"`
+	RefundableAmount int  `json:"refundableAmount"`
 }
 
 func (s Service) ApplyRefund(userID uint, orderID string, req ApplyRequest) error {
 	return s.DB.Transaction(func(tx *gorm.DB) error {
-		var order models.Order
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Items").Where("id = ? AND user_id = ?", orderID, userID).First(&order).Error; err != nil {
+		order, err := loadOrderRefundSource(tx, userID, orderID)
+		if err != nil {
 			return err
 		}
 		if order.Status != models.OrderStatusPaid || (order.PayStatus != models.PayStatusPaid && order.PayStatus != models.PayStatusPartialRefunded) {
@@ -49,7 +68,7 @@ func (s Service) ApplyRefund(userID uint, orderID string, req ApplyRequest) erro
 		}
 		var applyingCount int64
 		if err := tx.Model(&models.AfterSaleOrder{}).
-			Where("order_id = ? AND status = ?", order.ID, models.AfterSaleStatusApplying).
+			Where("order_id = ? AND status = ?", order.OrderID, models.AfterSaleStatusApplying).
 			Count(&applyingCount).Error; err != nil {
 			return err
 		}
@@ -57,10 +76,10 @@ func (s Service) ApplyRefund(userID uint, orderID string, req ApplyRequest) erro
 			return fmt.Errorf("该订单已有售后申请处理中")
 		}
 
-		afterSaleID := fmt.Sprintf("AS-%s-%d", order.ID, time.Now().UnixNano()%1000000)
+		afterSaleID := fmt.Sprintf("AS-%s-%d", order.OrderID, time.Now().UnixNano()%1000000)
 		afterSale := models.AfterSaleOrder{
 			ID:             afterSaleID,
-			OrderID:        order.ID,
+			OrderID:        order.OrderID,
 			UserID:         userID,
 			Type:           req.Type,
 			Status:         models.AfterSaleStatusApplying,
@@ -72,9 +91,9 @@ func (s Service) ApplyRefund(userID uint, orderID string, req ApplyRequest) erro
 			afterSale.Type = 1
 		}
 
-		itemsByID := make(map[uint]models.OrderItem, len(order.Items))
+		itemsByID := make(map[uint]orderRefundItem, len(order.Items))
 		for _, item := range order.Items {
-			itemsByID[item.ID] = item
+			itemsByID[item.OrderItemID] = item
 		}
 
 		fullOrderRefund := len(req.Items) == 0
@@ -84,7 +103,7 @@ func (s Service) ApplyRefund(userID uint, orderID string, req ApplyRequest) erro
 				return fmt.Errorf("该订单已无可退金额")
 			}
 			for _, item := range order.Items {
-				maxRefundable := item.PayableAmount - item.RefundedAmount
+				maxRefundable := item.RefundableAmount
 				if maxRefundable < 0 {
 					maxRefundable = 0
 				}
@@ -93,9 +112,9 @@ func (s Service) ApplyRefund(userID uint, orderID string, req ApplyRequest) erro
 				}
 				afterSale.Items = append(afterSale.Items, models.AfterSaleItem{
 					AfterSaleID:         afterSaleID,
-					OrderItemID:         item.ID,
+					OrderItemID:         item.OrderItemID,
 					SkuID:               item.SkuID,
-					Quantity:            refundableQuantity(item),
+					Quantity:            item.RefundableQty,
 					MaxRefundableAmount: maxRefundable,
 					ApplyAmount:         maxRefundable,
 				})
@@ -106,11 +125,11 @@ func (s Service) ApplyRefund(userID uint, orderID string, req ApplyRequest) erro
 				if !ok {
 					return fmt.Errorf("退款商品不属于该订单")
 				}
-				maxRefundable := item.PayableAmount - item.RefundedAmount
+				maxRefundable := item.RefundableAmount
 				if maxRefundable <= 0 {
-					return fmt.Errorf("订单行 %d 已无可退金额", item.ID)
+					return fmt.Errorf("订单行 %d 已无可退金额", item.OrderItemID)
 				}
-				maxQuantity := refundableQuantity(item)
+				maxQuantity := item.RefundableQty
 				if reqItem.Quantity <= 0 || reqItem.Quantity > maxQuantity {
 					return fmt.Errorf("退款数量不合法")
 				}
@@ -124,7 +143,7 @@ func (s Service) ApplyRefund(userID uint, orderID string, req ApplyRequest) erro
 				afterSale.ApplyAmount += applyAmount
 				afterSale.Items = append(afterSale.Items, models.AfterSaleItem{
 					AfterSaleID:         afterSaleID,
-					OrderItemID:         item.ID,
+					OrderItemID:         item.OrderItemID,
 					SkuID:               item.SkuID,
 					Quantity:            reqItem.Quantity,
 					MaxRefundableAmount: maxRefundable,
@@ -139,20 +158,12 @@ func (s Service) ApplyRefund(userID uint, orderID string, req ApplyRequest) erro
 			return err
 		}
 
-		fromStatus := order.Status
-		order.Status = models.OrderStatusRefundApplying
-		order.AfterSaleStatus = models.AfterSaleStatusApplying
-		order.RefundReason = req.RefundReason
-		order.RefundProof = req.RefundProof
-		if err := tx.Save(&order).Error; err != nil {
-			return err
-		}
-		if err := appendStateLog(tx, order.ID, fromStatus, models.OrderStatusRefundApplying, userID, "AFTERSALE_APPLIED", req.RefundReason); err != nil {
+		if err := markOrderRefundApplying(tx, order.OrderID, userID, req.RefundReason, req.RefundProof); err != nil {
 			return err
 		}
 		return outbox.NewService().Publish(tx, "aftersale", afterSale.ID, "AfterSaleApplied", map[string]interface{}{
 			"afterSaleId": afterSale.ID,
-			"orderId":     order.ID,
+			"orderId":     order.OrderID,
 			"userId":      userID,
 			"applyAmount": afterSale.ApplyAmount,
 		})
@@ -161,85 +172,49 @@ func (s Service) ApplyRefund(userID uint, orderID string, req ApplyRequest) erro
 
 func (s Service) AuditRefund(orderID string, req AuditRequest) error {
 	return s.DB.Transaction(func(tx *gorm.DB) error {
-		var order models.Order
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Items").First(&order, "id = ?", orderID).Error; err != nil {
-			return err
-		}
-		if order.Status != models.OrderStatusRefundApplying {
-			if req.Action == "approve" && order.AfterSaleStatus == models.AfterSaleStatusRefunded {
-				return nil
-			}
-			return fmt.Errorf("订单状态非退款申请中")
-		}
-
 		switch req.Action {
 		case "approve":
-			return s.approve(tx, order)
+			return s.approve(tx, orderID)
 		case "reject":
-			return s.reject(tx, order)
+			return s.reject(tx, orderID)
 		default:
 			return fmt.Errorf("无效的操作指令")
 		}
 	})
 }
 
-func (s Service) approve(tx *gorm.DB, order models.Order) error {
+func (s Service) approve(tx *gorm.DB, orderID string) error {
 	var afterSale models.AfterSaleOrder
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Items").Where("order_id = ? AND status = ?", order.ID, models.AfterSaleStatusApplying).First(&afterSale).Error; err != nil {
-		if err == gorm.ErrRecordNotFound && (order.Status == models.OrderStatusRefunded || order.PayStatus == models.PayStatusRefunded) {
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Items").Where("order_id = ? AND status = ?", orderID, models.AfterSaleStatusApplying).First(&afterSale).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			var done models.AfterSaleOrder
+			if doneErr := tx.Where("order_id = ? AND status = ?", orderID, models.AfterSaleStatusRefunded).First(&done).Error; doneErr == nil {
+				return nil
+			}
 			return nil
 		}
 		return err
 	}
 
-	var payOrder models.PaymentOrder
-	if err := tx.Where("order_id = ? AND status = ?", order.ID, models.PaymentStatusPaid).First(&payOrder).Error; err != nil {
-		payOrder = models.PaymentOrder{
-			ID:             payment.PaymentOrderID(order.ID),
-			OrderID:        order.ID,
-			UserID:         order.UserID,
-			Channel:        models.PaymentChannelMock,
-			Amount:         order.TotalAmount,
-			Currency:       "CNY",
-			Status:         models.PaymentStatusPaid,
-			ChannelTradeNo: "MOCK-" + order.ID,
-			IdempotencyKey: "mock:create:" + order.ID,
-		}
-		now := time.Now()
-		payOrder.PaidAt = &now
-		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&payOrder).Error; err != nil {
-			return err
-		}
+	order, err := loadOrderRefundSource(tx, afterSale.UserID, orderID)
+	if err != nil {
+		return err
 	}
 
 	now := time.Now()
 	refund := models.RefundOrder{
 		ID:              "REF-" + afterSale.ID,
-		PaymentOrderID:  payOrder.ID,
-		OrderID:         order.ID,
+		PaymentOrderID:  payment.PaymentOrderID(order.OrderID),
+		OrderID:         order.OrderID,
 		AfterSaleID:     afterSale.ID,
 		Amount:          afterSale.ApplyAmount,
-		Reason:          order.RefundReason,
+		Reason:          afterSale.Reason,
 		Status:          models.RefundStatusSuccess,
 		ChannelRefundNo: "MOCK-REF-" + afterSale.ID,
 		IdempotencyKey:  "mock:refund:" + afterSale.ID,
 		RefundedAt:      &now,
 	}
 	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&refund).Error; err != nil {
-		return err
-	}
-
-	fromStatus := order.Status
-	totalRefunded := sumRefundedAmount(tx, order.ID)
-	if totalRefunded >= order.TotalAmount {
-		order.Status = models.OrderStatusRefunded
-		order.PayStatus = models.PayStatusRefunded
-	} else {
-		order.Status = models.OrderStatusPaid
-		order.PayStatus = models.PayStatusPartialRefunded
-	}
-	order.AfterSaleStatus = models.AfterSaleStatusRefunded
-	if err := tx.Save(&order).Error; err != nil {
 		return err
 	}
 
@@ -255,23 +230,17 @@ func (s Service) approve(tx *gorm.DB, order models.Order) error {
 		}
 	}
 
-	restockItems := make([]inventory.RestockItem, 0, len(afterSale.Items))
+	restockItems := make([]map[string]interface{}, 0, len(afterSale.Items))
+	completeItems := make([]map[string]interface{}, 0, len(afterSale.Items))
 	for _, item := range afterSale.Items {
-		restockItems = append(restockItems, inventory.RestockItem{SkuID: item.SkuID, Quantity: item.Quantity})
+		restockItems = append(restockItems, map[string]interface{}{"skuId": item.SkuID, "quantity": item.Quantity})
+		completeItems = append(completeItems, map[string]interface{}{"orderItemId": item.OrderItemID, "amount": item.ApplyAmount})
 	}
-	if err := s.Inventory.RestockItemsForOrder(tx, order.ID, restockItems); err != nil {
+	if err := restockInventoryItems(tx, order.OrderID, restockItems); err != nil {
 		return err
 	}
-	for _, item := range afterSale.Items {
-		result := tx.Model(&models.OrderItem{}).
-			Where("id = ? AND refunded_amount + ? <= payable_amount", item.OrderItemID, item.ApplyAmount).
-			Update("refunded_amount", gorm.Expr("refunded_amount + ?", item.ApplyAmount))
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return fmt.Errorf("订单行 %d 可退金额不足", item.OrderItemID)
-		}
+	if err := completeOrderRefund(tx, order.OrderID, completeItems, "商家审核通过并模拟退款"); err != nil {
+		return err
 	}
 
 	entries := []models.AccountingEntry{
@@ -295,42 +264,35 @@ func (s Service) approve(tx *gorm.DB, order models.Order) error {
 	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&entries).Error; err != nil {
 		return err
 	}
-	if err := appendStateLog(tx, order.ID, fromStatus, order.Status, 0, "AFTERSALE_APPROVED", "商家审核通过并模拟退款"); err != nil {
-		return err
-	}
 	return outbox.NewService().Publish(tx, "refund", refund.ID, "RefundSucceeded", map[string]interface{}{
 		"refundId":    refund.ID,
 		"afterSaleId": afterSale.ID,
-		"orderId":     order.ID,
+		"orderId":     order.OrderID,
 		"amount":      refund.Amount,
 	})
 }
 
-func (s Service) reject(tx *gorm.DB, order models.Order) error {
+func (s Service) reject(tx *gorm.DB, orderID string) error {
 	var afterSale models.AfterSaleOrder
-	if err := tx.Where("order_id = ? AND status = ?", order.ID, models.AfterSaleStatusApplying).First(&afterSale).Error; err == nil {
+	if err := tx.Where("order_id = ? AND status = ?", orderID, models.AfterSaleStatusApplying).First(&afterSale).Error; err == nil {
 		afterSale.Status = models.AfterSaleStatusRejected
 		if err := tx.Save(&afterSale).Error; err != nil {
 			return err
 		}
-	}
-	fromStatus := order.Status
-	order.Status = models.OrderStatusRefundRejected
-	order.AfterSaleStatus = models.AfterSaleStatusRejected
-	if err := tx.Save(&order).Error; err != nil {
+	} else if err != gorm.ErrRecordNotFound {
 		return err
 	}
-	if err := appendStateLog(tx, order.ID, fromStatus, models.OrderStatusRefundRejected, 0, "AFTERSALE_REJECTED", "商家拒绝退款申请"); err != nil {
+	if err := rejectOrderRefund(tx, orderID); err != nil {
 		return err
 	}
 	return outbox.NewService().Publish(tx, "aftersale", afterSale.ID, "AfterSaleRejected", map[string]interface{}{
 		"afterSaleId": afterSale.ID,
-		"orderId":     order.ID,
+		"orderId":     orderID,
 	})
 }
 
-func remainingOrderRefundAmount(tx *gorm.DB, order models.Order) int {
-	totalRefunded := sumRefundedAmount(tx, order.ID)
+func remainingOrderRefundAmount(tx *gorm.DB, order orderRefundSource) int {
+	totalRefunded := sumRefundedAmount(tx, order.OrderID)
 	remain := order.TotalAmount - totalRefunded
 	if remain < 0 {
 		return 0
@@ -375,4 +337,36 @@ func appendStateLog(tx *gorm.DB, orderID string, fromStatus, toStatus int, opera
 		Event:        event,
 		Remark:       remark,
 	}).Error
+}
+
+func loadOrderRefundSource(tx *gorm.DB, userID uint, orderID string) (orderRefundSource, error) {
+	var source orderRefundSource
+	err := core.CallInternalService(tx, 8105, "GET", fmt.Sprintf("/api/internal/orders/%s/refund-source?userId=%d", orderID, userID), nil, &source)
+	return source, err
+}
+
+func markOrderRefundApplying(tx *gorm.DB, orderID string, userID uint, reason, proof string) error {
+	return core.CallInternalService(tx, 8105, "POST", fmt.Sprintf("/api/internal/orders/%s/refund-apply", orderID), map[string]interface{}{
+		"userId": userID,
+		"reason": reason,
+		"proof":  proof,
+	}, nil)
+}
+
+func completeOrderRefund(tx *gorm.DB, orderID string, items []map[string]interface{}, remark string) error {
+	return core.CallInternalService(tx, 8105, "POST", fmt.Sprintf("/api/internal/orders/%s/refund-complete", orderID), map[string]interface{}{
+		"items":  items,
+		"remark": remark,
+	}, nil)
+}
+
+func rejectOrderRefund(tx *gorm.DB, orderID string) error {
+	return core.CallInternalService(tx, 8105, "POST", fmt.Sprintf("/api/internal/orders/%s/refund-reject", orderID), nil, nil)
+}
+
+func restockInventoryItems(tx *gorm.DB, orderID string, items []map[string]interface{}) error {
+	return core.CallInternalService(tx, 8103, "POST", "/api/internal/inventory/restock", map[string]interface{}{
+		"orderId": orderID,
+		"items":   items,
+	}, nil)
 }

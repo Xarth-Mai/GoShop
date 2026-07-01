@@ -178,6 +178,214 @@ func fallbackLocal(db *gorm.DB, targetPort int, method, path string, reqBody int
 		return json.Unmarshal(raw, respDest)
 	}
 
+	if targetPort == 8105 && method == "GET" && strings.HasPrefix(path, "/api/internal/orders/") && strings.Contains(path, "/refund-source") {
+		parsed, err := url.Parse("http://internal" + path)
+		if err != nil {
+			return err
+		}
+		parts := strings.Split(parsed.Path, "/")
+		orderID := parts[len(parts)-2]
+		userID, _ := strconv.Atoi(parsed.Query().Get("userId"))
+
+		query := db.Preload("Items").Where("id = ?", orderID)
+		if userID > 0 {
+			query = query.Where("user_id = ?", uint(userID))
+		}
+		var order models.Order
+		if err := query.First(&order).Error; err != nil {
+			return err
+		}
+		type refundItem struct {
+			OrderItemID     uint `json:"orderItemId"`
+			SkuID           uint `json:"skuId"`
+			Quantity        int  `json:"quantity"`
+			PayableAmount   int  `json:"payableAmount"`
+			RefundedAmount  int  `json:"refundedAmount"`
+			RefundableQty   int  `json:"refundableQuantity"`
+			RefundableValue int  `json:"refundableAmount"`
+		}
+		items := make([]refundItem, 0, len(order.Items))
+		for _, item := range order.Items {
+			refundable := item.PayableAmount - item.RefundedAmount
+			if refundable < 0 {
+				refundable = 0
+			}
+			refundableQty := 0
+			if item.Quantity > 0 && item.PayableAmount > 0 && refundable > 0 {
+				refundableQty = refundable * item.Quantity / item.PayableAmount
+				if refundableQty <= 0 {
+					refundableQty = 1
+				}
+			}
+			items = append(items, refundItem{
+				OrderItemID:     item.ID,
+				SkuID:           item.SkuID,
+				Quantity:        item.Quantity,
+				PayableAmount:   item.PayableAmount,
+				RefundedAmount:  item.RefundedAmount,
+				RefundableQty:   refundableQty,
+				RefundableValue: refundable,
+			})
+		}
+		source := struct {
+			OrderID         string       `json:"orderId"`
+			UserID          uint         `json:"userId"`
+			TotalAmount     int          `json:"totalAmount"`
+			Status          int          `json:"status"`
+			PayStatus       int          `json:"payStatus"`
+			AfterSaleStatus int          `json:"afterSaleStatus"`
+			Items           []refundItem `json:"items"`
+		}{
+			OrderID:         order.ID,
+			UserID:          order.UserID,
+			TotalAmount:     order.TotalAmount,
+			Status:          order.Status,
+			PayStatus:       order.PayStatus,
+			AfterSaleStatus: order.AfterSaleStatus,
+			Items:           items,
+		}
+		raw, err := json.Marshal(source)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(raw, respDest)
+	}
+
+	if targetPort == 8105 && method == "POST" && strings.HasPrefix(path, "/api/internal/orders/") && strings.Contains(path, "/refund-apply") {
+		parts := strings.Split(path, "/")
+		orderID := parts[len(parts)-2]
+		var reqMap map[string]interface{}
+		rawBytes, err := json.Marshal(reqBody)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(rawBytes, &reqMap); err != nil {
+			return err
+		}
+		userID := uint(reqMap["userId"].(float64))
+		reason, _ := reqMap["reason"].(string)
+		proof, _ := reqMap["proof"].(string)
+		return db.Transaction(func(tx *gorm.DB) error {
+			var order models.Order
+			if err := tx.First(&order, "id = ? AND user_id = ?", orderID, userID).Error; err != nil {
+				return err
+			}
+			if order.Status != models.OrderStatusPaid || (order.PayStatus != models.PayStatusPaid && order.PayStatus != models.PayStatusPartialRefunded) {
+				return fmt.Errorf("该订单当前状态不支持申请退款")
+			}
+			fromStatus := order.Status
+			order.Status = models.OrderStatusRefundApplying
+			order.AfterSaleStatus = models.AfterSaleStatusApplying
+			order.RefundReason = reason
+			order.RefundProof = proof
+			if err := tx.Save(&order).Error; err != nil {
+				return err
+			}
+			return tx.Create(&models.OrderStateLog{
+				OrderID:      order.ID,
+				FromStatus:   fromStatus,
+				ToStatus:     models.OrderStatusRefundApplying,
+				OperatorType: 1,
+				OperatorID:   userID,
+				Event:        "AFTERSALE_APPLIED",
+				Remark:       reason,
+			}).Error
+		})
+	}
+
+	if targetPort == 8105 && method == "POST" && strings.HasPrefix(path, "/api/internal/orders/") && strings.Contains(path, "/refund-complete") {
+		parts := strings.Split(path, "/")
+		orderID := parts[len(parts)-2]
+		var req struct {
+			Items []struct {
+				OrderItemID uint `json:"orderItemId"`
+				Amount      int  `json:"amount"`
+			} `json:"items"`
+			Remark string `json:"remark"`
+		}
+		rawBytes, err := json.Marshal(reqBody)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(rawBytes, &req); err != nil {
+			return err
+		}
+		return db.Transaction(func(tx *gorm.DB) error {
+			var order models.Order
+			if err := tx.First(&order, "id = ?", orderID).Error; err != nil {
+				return err
+			}
+			if order.AfterSaleStatus == models.AfterSaleStatusRefunded && (order.PayStatus == models.PayStatusRefunded || order.PayStatus == models.PayStatusPartialRefunded) {
+				return nil
+			}
+			for _, item := range req.Items {
+				result := tx.Model(&models.OrderItem{}).
+					Where("id = ? AND order_id = ? AND refunded_amount + ? <= payable_amount", item.OrderItemID, orderID, item.Amount).
+					Update("refunded_amount", gorm.Expr("refunded_amount + ?", item.Amount))
+				if result.Error != nil {
+					return result.Error
+				}
+				if result.RowsAffected != 1 {
+					return fmt.Errorf("订单行 %d 可退金额不足", item.OrderItemID)
+				}
+			}
+			var totalRefunded int64
+			if err := tx.Model(&models.OrderItem{}).Where("order_id = ?", orderID).Select("COALESCE(SUM(refunded_amount), 0)").Scan(&totalRefunded).Error; err != nil {
+				return err
+			}
+			fromStatus := order.Status
+			if int(totalRefunded) >= order.TotalAmount {
+				order.Status = models.OrderStatusRefunded
+				order.PayStatus = models.PayStatusRefunded
+			} else {
+				order.Status = models.OrderStatusPaid
+				order.PayStatus = models.PayStatusPartialRefunded
+			}
+			order.AfterSaleStatus = models.AfterSaleStatusRefunded
+			if err := tx.Save(&order).Error; err != nil {
+				return err
+			}
+			return tx.Create(&models.OrderStateLog{
+				OrderID:      order.ID,
+				FromStatus:   fromStatus,
+				ToStatus:     order.Status,
+				OperatorType: 1,
+				OperatorID:   0,
+				Event:        "AFTERSALE_APPROVED",
+				Remark:       req.Remark,
+			}).Error
+		})
+	}
+
+	if targetPort == 8105 && method == "POST" && strings.HasPrefix(path, "/api/internal/orders/") && strings.Contains(path, "/refund-reject") {
+		parts := strings.Split(path, "/")
+		orderID := parts[len(parts)-2]
+		return db.Transaction(func(tx *gorm.DB) error {
+			var order models.Order
+			if err := tx.First(&order, "id = ?", orderID).Error; err != nil {
+				return err
+			}
+			if order.AfterSaleStatus == models.AfterSaleStatusRejected {
+				return nil
+			}
+			fromStatus := order.Status
+			order.Status = models.OrderStatusRefundRejected
+			order.AfterSaleStatus = models.AfterSaleStatusRejected
+			if err := tx.Save(&order).Error; err != nil {
+				return err
+			}
+			return tx.Create(&models.OrderStateLog{
+				OrderID:      order.ID,
+				FromStatus:   fromStatus,
+				ToStatus:     models.OrderStatusRefundRejected,
+				OperatorType: 1,
+				OperatorID:   0,
+				Event:        "AFTERSALE_REJECTED",
+				Remark:       "商家拒绝退款申请",
+			}).Error
+		})
+	}
+
 	// 2. 优惠券 Candidates 降级 (POST /api/internal/promotion/candidates)
 	if targetPort == 8104 && path == "/api/internal/promotion/candidates" {
 		var reqMap map[string]interface{}
@@ -460,6 +668,49 @@ func fallbackLocal(db *gorm.DB, targetPort int, method, path string, reqBody int
 				inv.Reserved -= res.Quantity
 				inv.Version++
 				if err := tx.Save(&inv).Error; err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
+
+	if targetPort == 8103 && path == "/api/internal/inventory/restock" {
+		var req struct {
+			OrderID string `json:"orderId"`
+			Items   []struct {
+				SkuID    uint `json:"skuId"`
+				Quantity int  `json:"quantity"`
+			} `json:"items"`
+		}
+		rawBytes, err := json.Marshal(reqBody)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(rawBytes, &req); err != nil {
+			return err
+		}
+		return db.Transaction(func(tx *gorm.DB) error {
+			for _, item := range req.Items {
+				var inv models.SkuInventory
+				if err := tx.First(&inv, "sku_id = ?", item.SkuID).Error; err != nil {
+					return err
+				}
+				if inv.Sold < item.Quantity {
+					return fmt.Errorf("SKU %d 已售库存不足，无法退款回补", item.SkuID)
+				}
+				inv.Sold -= item.Quantity
+				inv.Available += item.Quantity
+				inv.Version++
+				if err := tx.Save(&inv).Error; err != nil {
+					return err
+				}
+				if err := tx.Create(&models.InventoryJournal{
+					SkuID:      item.SkuID,
+					OrderID:    req.OrderID,
+					ChangeType: "REFUND_RESTOCK",
+					Quantity:   item.Quantity,
+				}).Error; err != nil {
 					return err
 				}
 			}
