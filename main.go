@@ -66,7 +66,7 @@ func main() {
 
 	// 3. 初始化数据库 (PostgreSQL)
 	core.Logger.Info("正在连接 PostgreSQL 数据库并执行读写分离配置...")
-	err = core.InitDB()
+	err = core.InitDB("")
 	if err != nil {
 		core.Logger.Warn("连接 PostgreSQL 数据库失败，系统将以数据库未就绪模式继续启动", zap.Error(err))
 	} else {
@@ -132,7 +132,7 @@ func main() {
 			// 尝试重连自愈
 			core.Logger.Warn("检测到数据库失联，尝试断线重连自愈...")
 			for i := 1; i <= 3; i++ {
-				if err := core.InitDB(); err == nil {
+				if err := core.InitDB(""); err == nil {
 					dbStatus = "OK (RESTORED)"
 					core.Logger.Info("数据库断线重连自愈成功!")
 					break

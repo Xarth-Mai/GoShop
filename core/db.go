@@ -15,47 +15,74 @@ var (
 	ReplicaDB *gorm.DB // 从库（仅读）
 )
 
-// InitDB 初始化数据库连接（主从读写分离）
-func InitDB() error {
+// InitDB 初始化数据库连接（支持主从读写分离与微服务多库隔离）
+func InitDB(serviceName string) error {
 	var err error
 	cfg := config.GlobalConfig.Database
 
-	// 初始化主库
-	DB, err = gorm.Open(postgres.Open(cfg.Master), &gorm.Config{})
-	if err != nil {
-		return err
+	dsn := cfg.Master
+	// 容错自愈：如果配置了微服务专有连接，先尝试使用专有连接
+	if serviceName != "" && cfg.Services != nil && cfg.Services[serviceName] != "" {
+		dsn = cfg.Services[serviceName]
 	}
 
-	// 数据库自动迁移
-	err = DB.AutoMigrate(
-		&models.User{},
-		&models.Category{},
-		&models.Spu{},
-		&models.Sku{},
-		&models.Order{},
-		&models.OrderItem{},
-		&models.OrderPromotionAllocation{},
-		&models.OrderStateLog{},
-		&models.PaymentOrder{},
-		&models.PaymentTransaction{},
-		&models.RefundOrder{},
-		&models.AccountingEntry{},
-		&models.AfterSaleOrder{},
-		&models.AfterSaleItem{},
-		&models.SkuInventory{},
-		&models.InventoryReservation{},
-		&models.InventoryJournal{},
-		&models.OutboxEvent{},
-		&models.InboxEvent{},
-		&models.Address{},
-		&models.Coupon{},
-		&models.UserCoupon{},
-		&models.CartItem{},
-		&models.DeadLetterOrder{},
-	)
+	// 初始化主库
+	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		return err
+		// 降级策略：如果微服务专属库未建立（如本地单库调试），自动降级回退到 master 共享大库
+		DB, err = gorm.Open(postgres.Open(cfg.Master), &gorm.Config{})
+		if err != nil {
+			return err
+		}
 	}
+
+	// 根据当前服务进行局部的 Model 自动迁移，防止各服务交叉建表
+	var migrateModels []interface{}
+	switch serviceName {
+	case "goshop-user-service":
+		migrateModels = []interface{}{&models.User{}, &models.Address{}}
+	case "goshop-product-service":
+		migrateModels = []interface{}{&models.Category{}, &models.Spu{}, &models.Sku{}}
+	case "goshop-inventory-service":
+		migrateModels = []interface{}{&models.SkuInventory{}, &models.InventoryReservation{}, &models.InventoryJournal{}}
+	case "goshop-promotion-service":
+		migrateModels = []interface{}{&models.Coupon{}, &models.UserCoupon{}}
+	case "goshop-order-service":
+		migrateModels = []interface{}{
+			&models.Order{}, &models.OrderItem{}, &models.OrderPromotionAllocation{},
+			&models.OrderStateLog{}, &models.DeadLetterOrder{}, &models.InboxEvent{}, &models.OutboxEvent{},
+		}
+	case "goshop-payment-service":
+		migrateModels = []interface{}{&models.PaymentOrder{}, &models.PaymentTransaction{}, &models.InboxEvent{}, &models.OutboxEvent{}}
+	case "goshop-aftersale-service":
+		migrateModels = []interface{}{
+			&models.AfterSaleOrder{}, &models.AfterSaleItem{}, &models.RefundOrder{},
+			&models.AccountingEntry{}, &models.InboxEvent{}, &models.OutboxEvent{},
+		}
+	case "goshop-cart-service":
+		migrateModels = []interface{}{&models.CartItem{}}
+	case "goshop-scheduler-service":
+		migrateModels = []interface{}{&models.OutboxEvent{}}
+	default:
+		// 兜底（空服务名，如单体运行/测试），进行全量 Model 自动迁移，保持向下兼容
+		migrateModels = []interface{}{
+			&models.User{}, &models.Category{}, &models.Spu{}, &models.Sku{},
+			&models.Order{}, &models.OrderItem{}, &models.OrderPromotionAllocation{},
+			&models.OrderStateLog{}, &models.PaymentOrder{}, &models.PaymentTransaction{},
+			&models.RefundOrder{}, &models.AccountingEntry{}, &models.AfterSaleOrder{},
+			&models.AfterSaleItem{}, &models.SkuInventory{}, &models.InventoryReservation{},
+			&models.InventoryJournal{}, &models.OutboxEvent{}, &models.InboxEvent{},
+			&models.Address{}, &models.Coupon{}, &models.UserCoupon{}, &models.CartItem{},
+			&models.DeadLetterOrder{},
+		}
+	}
+
+	if len(migrateModels) > 0 {
+		if err = DB.AutoMigrate(migrateModels...); err != nil {
+			return err
+		}
+	}
+
 	if err := migrateLegacyOrderStatuses(DB); err != nil {
 		return err
 	}

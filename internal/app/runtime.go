@@ -36,7 +36,7 @@ func RunService(opts ServiceOptions) {
 	cfg := config.GlobalConfig
 	gin.SetMode(cfg.Server.Mode)
 
-	if err := core.InitDB(); err != nil {
+	if err := core.InitDB(opts.Name); err != nil {
 		core.Logger.Warn("数据库初始化失败，服务将以数据库未就绪模式启动", zap.String("service", opts.Name), zap.Error(err))
 	} else if opts.SeedData {
 		if err := models.SeedProducts(core.DB); err != nil {

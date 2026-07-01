@@ -8,6 +8,16 @@ database:
   max_idle_conns: 10
   max_open_conns: 100
   conn_max_lifetime: 3600 # 连接最大生命周期（秒）
+  services:
+    goshop-user-service: "host=127.0.0.1 port=5432 user=postgres password=postgres dbname=goshop_user sslmode=disable TimeZone=Asia/Shanghai"
+    goshop-product-service: "host=127.0.0.1 port=5432 user=postgres password=postgres dbname=goshop_product sslmode=disable TimeZone=Asia/Shanghai"
+    goshop-inventory-service: "host=127.0.0.1 port=5432 user=postgres password=postgres dbname=goshop_inventory sslmode=disable TimeZone=Asia/Shanghai"
+    goshop-promotion-service: "host=127.0.0.1 port=5432 user=postgres password=postgres dbname=goshop_promotion sslmode=disable TimeZone=Asia/Shanghai"
+    goshop-order-service: "host=127.0.0.1 port=5432 user=postgres password=postgres dbname=goshop_order sslmode=disable TimeZone=Asia/Shanghai"
+    goshop-payment-service: "host=127.0.0.1 port=5432 user=postgres password=postgres dbname=goshop_payment sslmode=disable TimeZone=Asia/Shanghai"
+    goshop-aftersale-service: "host=127.0.0.1 port=5432 user=postgres password=postgres dbname=goshop_aftersale sslmode=disable TimeZone=Asia/Shanghai"
+    goshop-cart-service: "host=127.0.0.1 port=5432 user=postgres password=postgres dbname=goshop_cart sslmode=disable TimeZone=Asia/Shanghai"
+    goshop-scheduler-service: "host=127.0.0.1 port=5432 user=postgres password=postgres dbname=goshop_scheduler sslmode=disable TimeZone=Asia/Shanghai"
 
 redis:
   addr: "127.0.0.1:6379"
@@ -19,3 +29,6 @@ jwt:
   secret: "your_goshop_jwt_secret_key_change_me"
   expire: 7200 # Access Token 2小时
   refresh_expire: 604800 # Refresh Token 7天
+
+nats:
+  url: "nats://127.0.0.1:4222"
