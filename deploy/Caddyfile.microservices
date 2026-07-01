@@ -83,8 +83,15 @@
         }
     }
 
+    @index path / /index.html
+    header @index {
+        Cache-Control "no-cache, no-store, must-revalidate"
+        Pragma "no-cache"
+        Expires "0"
+    }
+
     handle {
-        root * ./web/dist
+        root * /opt/GoShop/web/dist
         try_files {path} /index.html
         file_server
     }
