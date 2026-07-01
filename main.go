@@ -199,8 +199,8 @@ func main() {
 		var totalRevenueCent int64 = 0
 
 		if core.DB != nil {
-			core.DB.Model(&models.Order{}).Where("status = ?", 2).Count(&ordersPaid)
-			core.DB.Model(&models.Order{}).Where("status = ?", 2).Select("COALESCE(SUM(total_amount), 0)").Row().Scan(&totalRevenueCent)
+			core.DB.Model(&models.Order{}).Where("status = ?", models.OrderStatusPaid).Count(&ordersPaid)
+			core.DB.Model(&models.Order{}).Where("status = ?", models.OrderStatusPaid).Select("COALESCE(SUM(total_amount), 0)").Row().Scan(&totalRevenueCent)
 		}
 
 		revenueVal := float64(totalRevenueCent) / 100.0
@@ -219,7 +219,7 @@ func main() {
 		// 获取待支付订单 (status = 1)
 		var pendingOrders []models.Order
 		if core.DB != nil {
-			core.DB.Where("status = ?", 1).Order("created_at desc").Find(&pendingOrders)
+			core.DB.Where("status = ?", models.OrderStatusPendingPayment).Order("created_at desc").Find(&pendingOrders)
 		}
 
 		c.JSON(http.StatusOK, gin.H{

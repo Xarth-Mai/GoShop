@@ -20,7 +20,7 @@ interface OrderInfo {
   id: string
   createdAt: string
   totalAmount: number
-  status: number // 1: 待支付, 2: 已支付, 3: 已取消, 4: 申请退款中, 5: 已退款, 6: 退款被拒绝
+  status: number
   refundReason?: string
   refundProof?: string
   receiverName?: string
@@ -28,6 +28,21 @@ interface OrderInfo {
   receiverAddr?: string
   items?: OrderItem[]
 }
+
+const ORDER_STATUS = {
+  PENDING_PAYMENT: 10,
+  PAID: 20,
+  CANCELED: 60,
+  REFUND_APPLYING: 110,
+  REFUNDED: 120,
+  REFUND_REJECTED: 130
+} as const
+
+const AFTERSALE_STATUSES = [
+  ORDER_STATUS.REFUND_APPLYING,
+  ORDER_STATUS.REFUNDED,
+  ORDER_STATUS.REFUND_REJECTED
+]
 
 interface LogItem {
   time: string
@@ -112,7 +127,7 @@ const handlePay = async (orderId: string) => {
       showSuccessToast.value = true
       // Update local status
       const order = allOrders.value.find(o => o.id === orderId)
-      if (order) order.status = 2
+      if (order) order.status = ORDER_STATUS.PAID
       
       await fetchMetrics()
       await fetchAllOrders()
@@ -207,9 +222,13 @@ const isExpanded = (orderId: string) => {
   return expandedTimelines.value.includes(orderId)
 }
 
+const isAfterSaleStatus = (status: number) => {
+  return AFTERSALE_STATUSES.includes(status as typeof AFTERSALE_STATUSES[number])
+}
+
 // Compute refund orders needing merchant audit
 const refundingOrders = computed(() => {
-  return allOrders.value.filter(o => o.status === 4)
+  return allOrders.value.filter(o => o.status === ORDER_STATUS.REFUND_APPLYING)
 })
 
 onMounted(() => {
@@ -286,25 +305,25 @@ onUnmounted(() => {
 
             <div class="order-footer">
               <div class="order-status-group">
-                <template v-if="order.status === 1">
+                <template v-if="order.status === ORDER_STATUS.PENDING_PAYMENT">
                   <Badge variant="coral">待支付</Badge>
                   <span class="countdown-hint">
                     支付倒计时: <span class="sec-highlight">{{ getRemainingSeconds(order) }}s</span>
                   </span>
                 </template>
-                <template v-else-if="order.status === 2">
+                <template v-else-if="order.status === ORDER_STATUS.PAID">
                   <Badge variant="pill" class="status-paid">已支付</Badge>
                 </template>
-                <template v-else-if="order.status === 3">
+                <template v-else-if="order.status === ORDER_STATUS.CANCELED">
                   <Badge variant="pill" class="status-cancelled">已取消 (超时自动释放)</Badge>
                 </template>
-                <template v-else-if="order.status === 4">
+                <template v-else-if="order.status === ORDER_STATUS.REFUND_APPLYING">
                   <Badge variant="coral">退款申请中</Badge>
                 </template>
-                <template v-else-if="order.status === 5">
+                <template v-else-if="order.status === ORDER_STATUS.REFUNDED">
                   <Badge variant="pill" class="status-cancelled">已全额退款</Badge>
                 </template>
-                <template v-else-if="order.status === 6">
+                <template v-else-if="order.status === ORDER_STATUS.REFUND_REJECTED">
                   <Badge variant="pill" class="status-paid">退款已拒绝</Badge>
                 </template>
               </div>
@@ -316,7 +335,7 @@ onUnmounted(() => {
                   :loading="isPaying"
                   variant="primary"
                   class="pay-btn"
-                  v-if="order.status === 1"
+                  v-if="order.status === ORDER_STATUS.PENDING_PAYMENT"
                   :disabled="getRemainingSeconds(order) <= 0"
                 >
                   去支付
@@ -327,7 +346,7 @@ onUnmounted(() => {
                   @click="openRefund(order.id)"
                   variant="secondary"
                   class="refund-btn-action"
-                  v-if="order.status === 2"
+                  v-if="order.status === ORDER_STATUS.PAID"
                 >
                   申请退款
                 </Button>
@@ -336,7 +355,7 @@ onUnmounted(() => {
                 <button
                   class="timeline-toggle-link"
                   @click="toggleTimeline(order.id)"
-                  v-if="[4, 5, 6].includes(order.status)"
+                  v-if="isAfterSaleStatus(order.status)"
                 >
                   {{ isExpanded(order.id) ? '收起进度' : '追踪售后进度' }}
                 </button>
@@ -344,7 +363,7 @@ onUnmounted(() => {
             </div>
 
             <!-- Refund Timeline Section -->
-            <div class="timeline-box" v-if="[4, 5, 6].includes(order.status) && isExpanded(order.id)">
+            <div class="timeline-box" v-if="isAfterSaleStatus(order.status) && isExpanded(order.id)">
               <div class="timeline-step active">
                 <span class="timeline-dot"></span>
                 <div class="timeline-content">
@@ -352,13 +371,13 @@ onUnmounted(() => {
                   <p class="step-desc">您已提交退款申请。原因: "{{ order.refundReason }}"</p>
                 </div>
               </div>
-              <div :class="['timeline-step', { active: order.status !== 4 }]">
+              <div :class="['timeline-step', { active: order.status !== ORDER_STATUS.REFUND_APPLYING }]">
                 <span class="timeline-dot"></span>
                 <div class="timeline-content">
                   <div class="step-title">商家人工审核</div>
-                  <p class="step-desc" v-if="order.status === 4">等待商家安全风控审核中，资金处于托管状态...</p>
-                  <p class="step-desc success-msg" v-else-if="order.status === 5">商家审核通过。全额资金原路退回，库存自动回滚确认。</p>
-                  <p class="step-desc reject-msg" v-else-if="order.status === 6">商家已拒绝退款申请。订单重归交易态。</p>
+                  <p class="step-desc" v-if="order.status === ORDER_STATUS.REFUND_APPLYING">等待商家安全风控审核中，资金处于托管状态...</p>
+                  <p class="step-desc success-msg" v-else-if="order.status === ORDER_STATUS.REFUNDED">商家审核通过。全额资金原路退回，库存自动回滚确认。</p>
+                  <p class="step-desc reject-msg" v-else-if="order.status === ORDER_STATUS.REFUND_REJECTED">商家已拒绝退款申请。订单重归交易态。</p>
                 </div>
               </div>
             </div>

@@ -98,14 +98,23 @@ CREATE TABLE IF NOT EXISTS orders (
     user_id INTEGER NOT NULL REFERENCES users(id),
     total_amount INTEGER NOT NULL,
     discount_amount INTEGER NOT NULL DEFAULT 0,
+    goods_origin_amount INTEGER NOT NULL DEFAULT 0,
+    goods_discount_amount INTEGER NOT NULL DEFAULT 0,
     shipping_fee INTEGER NOT NULL DEFAULT 0,
+    shipping_discount_amount INTEGER NOT NULL DEFAULT 0,
     tax_fee INTEGER NOT NULL DEFAULT 0,
-    status INTEGER NOT NULL DEFAULT 1,
+    tax_discount_amount INTEGER NOT NULL DEFAULT 0,
+    payable_amount INTEGER NOT NULL DEFAULT 0,
+    status INTEGER NOT NULL DEFAULT 10,
+    pay_status INTEGER NOT NULL DEFAULT 0,
+    after_sale_status INTEGER NOT NULL DEFAULT 0,
+    user_coupon_id INTEGER NOT NULL DEFAULT 0,
     refund_reason VARCHAR(256),
     refund_proof VARCHAR(512),
     receiver_name VARCHAR(256),
     receiver_phone VARCHAR(256),
     receiver_addr VARCHAR(512),
+    pay_expire_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -117,10 +126,138 @@ CREATE TABLE IF NOT EXISTS order_items (
     sku_id INTEGER NOT NULL REFERENCES skus(id),
     price INTEGER NOT NULL,
     quantity INTEGER NOT NULL,
+    origin_amount INTEGER NOT NULL DEFAULT 0,
+    item_discount_amount INTEGER NOT NULL DEFAULT 0,
+    payable_amount INTEGER NOT NULL DEFAULT 0,
+    refunded_amount INTEGER NOT NULL DEFAULT 0,
+    merchant_id INTEGER NOT NULL DEFAULT 0,
+    promotion_snapshot TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
+
+CREATE TABLE IF NOT EXISTS order_promotion_allocations (
+    id SERIAL PRIMARY KEY,
+    order_id VARCHAR(64) NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    order_item_id INTEGER REFERENCES order_items(id) ON DELETE CASCADE,
+    sku_id INTEGER NOT NULL REFERENCES skus(id),
+    campaign_id INTEGER NOT NULL DEFAULT 0,
+    user_coupon_id INTEGER NOT NULL DEFAULT 0,
+    discount_type INTEGER NOT NULL,
+    discount_amount INTEGER NOT NULL,
+    allocation_snapshot TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_order_promotion_allocations_order_id ON order_promotion_allocations(order_id);
+CREATE INDEX IF NOT EXISTS idx_order_promotion_allocations_user_coupon_id ON order_promotion_allocations(user_coupon_id);
+
+CREATE TABLE IF NOT EXISTS order_state_logs (
+    id SERIAL PRIMARY KEY,
+    order_id VARCHAR(64) NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    from_status INTEGER,
+    to_status INTEGER NOT NULL,
+    operator_type INTEGER NOT NULL,
+    operator_id INTEGER,
+    event VARCHAR(64) NOT NULL,
+    remark TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_order_state_logs_order_id ON order_state_logs(order_id);
+
+CREATE TABLE IF NOT EXISTS payment_orders (
+    id VARCHAR(64) PRIMARY KEY,
+    order_id VARCHAR(64) NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    channel INTEGER NOT NULL,
+    amount INTEGER NOT NULL,
+    currency VARCHAR(8) NOT NULL DEFAULT 'CNY',
+    status INTEGER NOT NULL,
+    channel_trade_no VARCHAR(128),
+    pay_url TEXT,
+    idempotency_key VARCHAR(128) UNIQUE,
+    paid_at TIMESTAMP WITH TIME ZONE,
+    version INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_payment_orders_order_id ON payment_orders(order_id);
+CREATE INDEX IF NOT EXISTS idx_payment_orders_user_id ON payment_orders(user_id);
+
+CREATE TABLE IF NOT EXISTS payment_transactions (
+    id SERIAL PRIMARY KEY,
+    payment_order_id VARCHAR(64) NOT NULL REFERENCES payment_orders(id) ON DELETE CASCADE,
+    channel INTEGER NOT NULL,
+    channel_event_id VARCHAR(128) NOT NULL,
+    event_type VARCHAR(64) NOT NULL,
+    raw_payload TEXT NOT NULL,
+    signature VARCHAR(512),
+    process_status INTEGER NOT NULL,
+    error_message TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(channel, channel_event_id)
+);
+CREATE INDEX IF NOT EXISTS idx_payment_transactions_payment_order_id ON payment_transactions(payment_order_id);
+
+CREATE TABLE IF NOT EXISTS refund_orders (
+    id VARCHAR(64) PRIMARY KEY,
+    payment_order_id VARCHAR(64) NOT NULL REFERENCES payment_orders(id),
+    order_id VARCHAR(64) NOT NULL REFERENCES orders(id),
+    after_sale_id VARCHAR(64),
+    amount INTEGER NOT NULL,
+    reason VARCHAR(256),
+    status INTEGER NOT NULL,
+    channel_refund_no VARCHAR(128),
+    idempotency_key VARCHAR(128) UNIQUE,
+    refunded_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_refund_orders_order_id ON refund_orders(order_id);
+
+CREATE TABLE IF NOT EXISTS accounting_entries (
+    id SERIAL PRIMARY KEY,
+    biz_type VARCHAR(64) NOT NULL,
+    biz_id VARCHAR(128) NOT NULL,
+    account_type VARCHAR(64) NOT NULL,
+    direction INTEGER NOT NULL,
+    amount INTEGER NOT NULL,
+    currency VARCHAR(8) NOT NULL DEFAULT 'CNY',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(biz_type, biz_id, account_type, direction)
+);
+
+CREATE TABLE IF NOT EXISTS after_sale_orders (
+    id VARCHAR(64) PRIMARY KEY,
+    order_id VARCHAR(64) NOT NULL REFERENCES orders(id),
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    type INTEGER NOT NULL,
+    status INTEGER NOT NULL,
+    reason VARCHAR(256),
+    proof_urls TEXT,
+    apply_amount INTEGER NOT NULL,
+    approved_amount INTEGER NOT NULL DEFAULT 0,
+    refund_id VARCHAR(64),
+    return_tracking_no VARCHAR(128),
+    version INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_after_sale_orders_order_id ON after_sale_orders(order_id);
+CREATE INDEX IF NOT EXISTS idx_after_sale_orders_user_id ON after_sale_orders(user_id);
+
+CREATE TABLE IF NOT EXISTS after_sale_items (
+    id SERIAL PRIMARY KEY,
+    after_sale_id VARCHAR(64) NOT NULL REFERENCES after_sale_orders(id) ON DELETE CASCADE,
+    order_item_id INTEGER NOT NULL REFERENCES order_items(id),
+    sku_id INTEGER NOT NULL REFERENCES skus(id),
+    quantity INTEGER NOT NULL,
+    max_refundable_amount INTEGER NOT NULL,
+    apply_amount INTEGER NOT NULL,
+    approved_amount INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_after_sale_items_after_sale_id ON after_sale_items(after_sale_id);
 
 CREATE TABLE IF NOT EXISTS dead_letter_orders (
     id SERIAL PRIMARY KEY,

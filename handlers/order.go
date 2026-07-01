@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type OrderItemReq struct {
@@ -30,6 +31,15 @@ type CreateOrderReq struct {
 
 type PayReq struct {
 	OrderID string `json:"orderId" binding:"required"`
+}
+
+type MockPaymentCallbackReq struct {
+	PaymentOrderID string `json:"paymentOrderId"`
+	OrderID        string `json:"orderId"`
+	Amount         int    `json:"amount" binding:"required"`
+	EventID        string `json:"eventId"`
+	ChannelTradeNo string `json:"channelTradeNo"`
+	Status         string `json:"status"`
 }
 
 type RefundReq struct {
@@ -57,6 +67,83 @@ func pushSystemLog(ctx context.Context, logType, msg string) {
 	bytes, _ := json.Marshal(item)
 	core.RedisClient.LPush(ctx, "seckill:logs", string(bytes))
 	core.RedisClient.LTrim(ctx, "seckill:logs", 0, 9)
+}
+
+func allocateDiscountByAmount(items []models.OrderItem, discount int) []models.OrderItem {
+	if discount <= 0 || len(items) == 0 {
+		for i := range items {
+			items[i].ItemDiscountAmount = 0
+			items[i].PayableAmount = items[i].OriginAmount
+		}
+		return items
+	}
+
+	totalEligible := 0
+	for _, item := range items {
+		totalEligible += item.OriginAmount
+	}
+	if totalEligible <= 0 {
+		return items
+	}
+
+	remain := discount
+	for i := range items {
+		alloc := 0
+		if i == len(items)-1 {
+			alloc = remain
+		} else {
+			alloc = discount * items[i].OriginAmount / totalEligible
+		}
+		if alloc > items[i].OriginAmount {
+			alloc = items[i].OriginAmount
+		}
+		if alloc < 0 {
+			alloc = 0
+		}
+		items[i].ItemDiscountAmount = alloc
+		items[i].PayableAmount = items[i].OriginAmount - alloc
+		remain -= alloc
+	}
+	return items
+}
+
+func appendOrderStateLog(tx *gorm.DB, orderID string, fromStatus, toStatus int, operatorID uint, event, remark string) error {
+	return tx.Create(&models.OrderStateLog{
+		OrderID:      orderID,
+		FromStatus:   fromStatus,
+		ToStatus:     toStatus,
+		OperatorType: 1,
+		OperatorID:   operatorID,
+		Event:        event,
+		Remark:       remark,
+	}).Error
+}
+
+func paymentOrderID(orderID string) string {
+	return "PAY-" + orderID
+}
+
+func createMockPaymentOrder(tx *gorm.DB, order models.Order) (models.PaymentOrder, error) {
+	payment := models.PaymentOrder{
+		ID:             paymentOrderID(order.ID),
+		OrderID:        order.ID,
+		UserID:         order.UserID,
+		Channel:        models.PaymentChannelMock,
+		Amount:         order.TotalAmount,
+		Currency:       "CNY",
+		Status:         models.PaymentStatusCreated,
+		IdempotencyKey: "mock:create:" + order.ID,
+	}
+
+	var existing models.PaymentOrder
+	err := tx.Where("id = ?", payment.ID).First(&existing).Error
+	if err == nil {
+		return existing, nil
+	}
+	if err != gorm.ErrRecordNotFound {
+		return payment, err
+	}
+	return payment, tx.Create(&payment).Error
 }
 
 // CreateOrder 普通商品多项合并下单接口
@@ -104,7 +191,7 @@ func CreateOrder(c *gin.Context) {
 	for _, item := range req.Items {
 		// 行级悲观锁锁定 SKU 库存
 		var sku models.Sku
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("id = ?", item.SkuID).First(&sku).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", item.SkuID).First(&sku).Error; err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusBadRequest, gin.H{"message": fmt.Sprintf("商品规格 ID %d 不存在", item.SkuID)})
 			return
@@ -125,9 +212,11 @@ func CreateOrder(c *gin.Context) {
 		}
 
 		orderItems = append(orderItems, models.OrderItem{
-			SkuID:    item.SkuID,
-			Price:    sku.Price,
-			Quantity: item.Quantity,
+			SkuID:         item.SkuID,
+			Price:         sku.Price,
+			Quantity:      item.Quantity,
+			OriginAmount:  sku.Price * item.Quantity,
+			PayableAmount: sku.Price * item.Quantity,
 		})
 
 		subtotal += sku.Price * item.Quantity
@@ -187,29 +276,66 @@ func CreateOrder(c *gin.Context) {
 
 	// 应付总额
 	totalAmount := subtotal + shippingFee + taxFee - discountAmount
-	if totalAmount < 0 {
-		totalAmount = 0
+	if subtotal > 0 && totalAmount <= 0 {
+		totalAmount = 1
 	}
+	orderItems = allocateDiscountByAmount(orderItems, discountAmount)
 
 	// 5. 创建订单
 	orderID := fmt.Sprintf("GS-%d-%d", time.Now().Unix(), time.Now().Nanosecond()%1000)
+	payExpireAt := time.Now().Add(60 * time.Second)
 	order := models.Order{
-		ID:             orderID,
-		UserID:         userID,
-		TotalAmount:    totalAmount,
-		DiscountAmount: discountAmount,
-		ShippingFee:    shippingFee,
-		TaxFee:         taxFee,
-		Status:         1, // 待支付
-		ReceiverName:   string(address.ReceiverName),
-		ReceiverPhone:  string(address.ReceiverPhone),
-		ReceiverAddr:   receiverAddrSnapshot,
-		Items:          orderItems,
+		ID:                  orderID,
+		UserID:              userID,
+		TotalAmount:         totalAmount,
+		DiscountAmount:      discountAmount,
+		GoodsOriginAmount:   subtotal,
+		GoodsDiscountAmount: discountAmount,
+		ShippingFee:         shippingFee,
+		TaxFee:              taxFee,
+		PayableAmount:       totalAmount,
+		Status:              models.OrderStatusPendingPayment,
+		PayStatus:           models.PayStatusUnpaid,
+		AfterSaleStatus:     models.AfterSaleStatusNone,
+		UserCouponID:        req.UserCouponID,
+		ReceiverName:        string(address.ReceiverName),
+		ReceiverPhone:       string(address.ReceiverPhone),
+		ReceiverAddr:        receiverAddrSnapshot,
+		PayExpireAt:         &payExpireAt,
+		Items:               orderItems,
 	}
 
 	if err := tx.Create(&order).Error; err != nil {
 		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "创建订单记录失败: " + err.Error()})
+		return
+	}
+
+	if req.UserCouponID > 0 && discountAmount > 0 {
+		for _, item := range order.Items {
+			if item.ItemDiscountAmount <= 0 {
+				continue
+			}
+			allocation := models.OrderPromotionAllocation{
+				OrderID:            order.ID,
+				OrderItemID:        item.ID,
+				SkuID:              item.SkuID,
+				UserCouponID:       req.UserCouponID,
+				DiscountType:       1,
+				DiscountAmount:     item.ItemDiscountAmount,
+				AllocationSnapshot: fmt.Sprintf(`{"origin_amount":%d,"payable_amount":%d}`, item.OriginAmount, item.PayableAmount),
+			}
+			if err := tx.Create(&allocation).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"message": "保存优惠分摊失败: " + err.Error()})
+				return
+			}
+		}
+	}
+
+	if err := appendOrderStateLog(tx, order.ID, 0, models.OrderStatusPendingPayment, userID, "ORDER_CREATED", "订单创建并预占库存"); err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "保存订单状态日志失败: " + err.Error()})
 		return
 	}
 
@@ -220,7 +346,10 @@ func CreateOrder(c *gin.Context) {
 	}
 	tx.Where("user_id = ? AND sku_id IN ?", userID, skuIDs).Delete(&models.CartItem{})
 
-	tx.Commit()
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "提交订单事务失败"})
+		return
+	}
 
 	// 7. 加入延迟队列 (普通订单设置 60 秒超时支付，便于自测演示)
 	if core.RedisClient != nil {
@@ -236,6 +365,7 @@ func CreateOrder(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":      "success",
 		"orderId":     orderID,
+		"payExpireAt": payExpireAt,
 		"totalAmount": totalAmount,
 	})
 }
@@ -262,27 +392,100 @@ func PayOrder(c *gin.Context) {
 
 	tx := core.DB.Begin()
 	var order models.Order
-	if err := tx.First(&order, "id = ? AND user_id = ?", req.OrderID, userID).Error; err != nil {
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&order, "id = ? AND user_id = ?", req.OrderID, userID).Error; err != nil {
 		tx.Rollback()
 		c.JSON(http.StatusNotFound, gin.H{"message": "订单不存在"})
 		return
 	}
 
-	if order.Status != 1 {
+	if order.Status == models.OrderStatusPaid && order.PayStatus == models.PayStatusPaid {
+		tx.Rollback()
+		c.JSON(http.StatusOK, gin.H{"status": "paid", "paymentOrderId": paymentOrderID(order.ID)})
+		return
+	}
+
+	if order.Status != models.OrderStatusPendingPayment || order.PayStatus != models.PayStatusUnpaid {
 		tx.Rollback()
 		c.JSON(http.StatusBadRequest, gin.H{"message": "当前订单状态不可支付"})
 		return
 	}
 
-	// 更新为已支付 (2)
-	order.Status = 2
+	payment, err := createMockPaymentOrder(tx, order)
+	if err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "创建支付单失败: " + err.Error()})
+		return
+	}
+
+	now := time.Now()
+	eventID := "mock-pay:" + payment.ID
+	transaction := models.PaymentTransaction{
+		PaymentOrderID: payment.ID,
+		Channel:        models.PaymentChannelMock,
+		ChannelEventID: eventID,
+		EventType:      "mock.payment.succeeded",
+		RawPayload:     fmt.Sprintf(`{"order_id":"%s","amount":%d}`, order.ID, payment.Amount),
+		ProcessStatus:  models.TransactionStatusProcessed,
+	}
+	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&transaction).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "保存支付流水失败: " + err.Error()})
+		return
+	}
+
+	payment.Status = models.PaymentStatusPaid
+	payment.ChannelTradeNo = "MOCK-" + order.ID
+	payment.PaidAt = &now
+	payment.Version++
+	if err := tx.Save(&payment).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "支付单状态更新失败"})
+		return
+	}
+
+	fromStatus := order.Status
+	order.Status = models.OrderStatusPaid
+	order.PayStatus = models.PayStatusPaid
 	if err := tx.Save(&order).Error; err != nil {
 		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "支付状态更新失败"})
 		return
 	}
 
-	tx.Commit()
+	entries := []models.AccountingEntry{
+		{
+			BizType:     "payment",
+			BizID:       payment.ID,
+			AccountType: "cash",
+			Direction:   models.AccountingDirectionDebit,
+			Amount:      payment.Amount,
+			Currency:    payment.Currency,
+		},
+		{
+			BizType:     "payment",
+			BizID:       payment.ID,
+			AccountType: "sales_revenue",
+			Direction:   models.AccountingDirectionCredit,
+			Amount:      payment.Amount,
+			Currency:    payment.Currency,
+		},
+	}
+	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&entries).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "保存财务分录失败"})
+		return
+	}
+
+	if err := appendOrderStateLog(tx, order.ID, fromStatus, models.OrderStatusPaid, userID, "ORDER_PAID", "模拟支付成功并入账"); err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "保存订单状态日志失败"})
+		return
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "提交支付事务失败"})
+		return
+	}
 
 	// 从延迟队列中剔除
 	if core.RedisClient != nil {
@@ -292,7 +495,154 @@ func PayOrder(c *gin.Context) {
 		pushSystemLog(ctx, "SUCCESS", fmt.Sprintf("Order: %s PAID. Removed from delay queue.", req.OrderID))
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "paid"})
+	c.JSON(http.StatusOK, gin.H{"status": "paid", "paymentOrderId": payment.ID})
+}
+
+// MockPaymentCallback 模拟三方支付异步回调，提供金额校验和事件幂等。
+func MockPaymentCallback(c *gin.Context) {
+	var req MockPaymentCallbackReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "参数错误: " + err.Error()})
+		return
+	}
+	if core.DB == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "数据库未就绪"})
+		return
+	}
+	if req.PaymentOrderID == "" && req.OrderID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "paymentOrderId 和 orderId 至少传一个"})
+		return
+	}
+	if req.PaymentOrderID == "" {
+		req.PaymentOrderID = paymentOrderID(req.OrderID)
+	}
+	if req.EventID == "" {
+		req.EventID = "mock-callback:" + req.PaymentOrderID
+	}
+	if req.ChannelTradeNo == "" {
+		req.ChannelTradeNo = "MOCK-CB-" + req.PaymentOrderID
+	}
+	if req.Status == "" {
+		req.Status = "paid"
+	}
+
+	raw, _ := json.Marshal(req)
+	var callbackErr error
+	err := core.DB.Transaction(func(tx *gorm.DB) error {
+		var existingTx models.PaymentTransaction
+		if err := tx.Where("channel = ? AND channel_event_id = ?", models.PaymentChannelMock, req.EventID).First(&existingTx).Error; err == nil {
+			return nil
+		} else if err != gorm.ErrRecordNotFound {
+			return err
+		}
+
+		var payment models.PaymentOrder
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&payment, "id = ?", req.PaymentOrderID).Error; err != nil {
+			return err
+		}
+
+		processStatus := models.TransactionStatusProcessed
+		errorMessage := ""
+		if req.Amount != payment.Amount {
+			processStatus = models.TransactionStatusFailed
+			errorMessage = "callback amount mismatch"
+		}
+		transaction := models.PaymentTransaction{
+			PaymentOrderID: payment.ID,
+			Channel:        models.PaymentChannelMock,
+			ChannelEventID: req.EventID,
+			EventType:      "mock.payment.callback",
+			RawPayload:     string(raw),
+			ProcessStatus:  processStatus,
+			ErrorMessage:   errorMessage,
+		}
+		if err := tx.Create(&transaction).Error; err != nil {
+			return err
+		}
+		if processStatus == models.TransactionStatusFailed {
+			callbackErr = fmt.Errorf("%s", errorMessage)
+			return nil
+		}
+		if req.Status != "paid" {
+			return fmt.Errorf("unsupported mock callback status: %s", req.Status)
+		}
+		if payment.Status == models.PaymentStatusPaid {
+			return nil
+		}
+
+		var order models.Order
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&order, "id = ? AND user_id = ?", payment.OrderID, payment.UserID).Error; err != nil {
+			return err
+		}
+		if order.Status != models.OrderStatusPendingPayment || order.PayStatus != models.PayStatusUnpaid {
+			return nil
+		}
+
+		now := time.Now()
+		payment.Status = models.PaymentStatusPaid
+		payment.ChannelTradeNo = req.ChannelTradeNo
+		payment.PaidAt = &now
+		payment.Version++
+		if err := tx.Save(&payment).Error; err != nil {
+			return err
+		}
+
+		fromStatus := order.Status
+		order.Status = models.OrderStatusPaid
+		order.PayStatus = models.PayStatusPaid
+		if err := tx.Save(&order).Error; err != nil {
+			return err
+		}
+
+		entries := []models.AccountingEntry{
+			{
+				BizType:     "payment",
+				BizID:       payment.ID,
+				AccountType: "cash",
+				Direction:   models.AccountingDirectionDebit,
+				Amount:      payment.Amount,
+				Currency:    payment.Currency,
+			},
+			{
+				BizType:     "payment",
+				BizID:       payment.ID,
+				AccountType: "sales_revenue",
+				Direction:   models.AccountingDirectionCredit,
+				Amount:      payment.Amount,
+				Currency:    payment.Currency,
+			},
+		}
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&entries).Error; err != nil {
+			return err
+		}
+
+		return appendOrderStateLog(tx, order.ID, fromStatus, models.OrderStatusPaid, order.UserID, "PAYMENT_CALLBACK_PAID", "模拟支付回调入账")
+	})
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "支付回调处理失败: " + err.Error()})
+		return
+	}
+	if callbackErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "支付回调处理失败: " + callbackErr.Error()})
+		return
+	}
+
+	if core.RedisClient != nil {
+		ctx := context.Background()
+		orderID := req.OrderID
+		if orderID == "" {
+			var payment models.PaymentOrder
+			if err := core.DB.Select("order_id").First(&payment, "id = ?", req.PaymentOrderID).Error; err == nil {
+				orderID = payment.OrderID
+			}
+		}
+		if orderID != "" {
+			core.RedisClient.ZRem(ctx, "seckill:delay_queue", orderID)
+			core.RedisClient.ZRem(ctx, "seckill:delay_queue:processing", orderID)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "success"})
 }
 
 // GetOrders 查询当前登录用户的订单列表
@@ -350,24 +700,67 @@ func ApplyRefund(c *gin.Context) {
 		return
 	}
 
-	var order models.Order
-	if err := core.DB.Where("id = ? AND user_id = ?", orderID, userID).First(&order).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"message": "订单不存在"})
-		return
-	}
+	err := core.DB.Transaction(func(tx *gorm.DB) error {
+		var order models.Order
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Items").Where("id = ? AND user_id = ?", orderID, userID).First(&order).Error; err != nil {
+			return err
+		}
 
-	// 必须是已支付状态才能申请退款 (2)
-	if order.Status != 2 {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "该订单当前状态不支持申请退款"})
-		return
-	}
+		// 必须是已支付状态才能申请退款
+		if order.Status != models.OrderStatusPaid || order.PayStatus != models.PayStatusPaid {
+			return fmt.Errorf("该订单当前状态不支持申请退款")
+		}
 
-	order.Status = 4 // 申请退款中
-	order.RefundReason = req.RefundReason
-	order.RefundProof = req.RefundProof
+		afterSaleID := fmt.Sprintf("AS-%s", order.ID)
+		afterSale := models.AfterSaleOrder{
+			ID:             afterSaleID,
+			OrderID:        order.ID,
+			UserID:         userID,
+			Type:           1,
+			Status:         models.AfterSaleStatusApplying,
+			Reason:         req.RefundReason,
+			ProofURLs:      req.RefundProof,
+			ApplyAmount:    order.TotalAmount,
+			ApprovedAmount: 0,
+		}
 
-	if err := core.DB.Save(&order).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"message": "提交退款申请失败: " + err.Error()})
+		for _, item := range order.Items {
+			maxRefundable := item.PayableAmount - item.RefundedAmount
+			if maxRefundable < 0 {
+				maxRefundable = 0
+			}
+			afterSale.Items = append(afterSale.Items, models.AfterSaleItem{
+				AfterSaleID:         afterSaleID,
+				OrderItemID:         item.ID,
+				SkuID:               item.SkuID,
+				Quantity:            item.Quantity,
+				MaxRefundableAmount: maxRefundable,
+				ApplyAmount:         maxRefundable,
+			})
+		}
+
+		if err := tx.Create(&afterSale).Error; err != nil {
+			return err
+		}
+
+		fromStatus := order.Status
+		order.Status = models.OrderStatusRefundApplying
+		order.AfterSaleStatus = models.AfterSaleStatusApplying
+		order.RefundReason = req.RefundReason
+		order.RefundProof = req.RefundProof
+
+		if err := tx.Save(&order).Error; err != nil {
+			return err
+		}
+
+		return appendOrderStateLog(tx, order.ID, fromStatus, models.OrderStatusRefundApplying, userID, "AFTERSALE_APPLIED", req.RefundReason)
+	})
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"message": "订单不存在"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"message": "提交退款申请失败: " + err.Error()})
 		return
 	}
 
@@ -395,34 +788,135 @@ func AuditRefund(c *gin.Context) {
 
 	tx := core.DB.Begin()
 	var order models.Order
-	if err := tx.Preload("Items").First(&order, "id = ?", orderID).Error; err != nil {
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Items").First(&order, "id = ?", orderID).Error; err != nil {
 		tx.Rollback()
 		c.JSON(http.StatusNotFound, gin.H{"message": "订单不存在"})
 		return
 	}
 
-	// 必须是退款申请中状态 (4)
-	if order.Status != 4 {
+	// 必须是退款申请中状态
+	if order.Status != models.OrderStatusRefundApplying {
 		tx.Rollback()
 		c.JSON(http.StatusBadRequest, gin.H{"message": "订单状态非退款申请中"})
 		return
 	}
 
 	if req.Action == "approve" {
-		order.Status = 5 // 已退款
+		var afterSale models.AfterSaleOrder
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("order_id = ? AND status = ?", order.ID, models.AfterSaleStatusApplying).First(&afterSale).Error; err != nil && err != gorm.ErrRecordNotFound {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "查询售后单失败"})
+			return
+		}
+
+		var payment models.PaymentOrder
+		if err := tx.Where("order_id = ? AND status = ?", order.ID, models.PaymentStatusPaid).First(&payment).Error; err != nil {
+			payment = models.PaymentOrder{
+				ID:             paymentOrderID(order.ID),
+				OrderID:        order.ID,
+				UserID:         order.UserID,
+				Channel:        models.PaymentChannelMock,
+				Amount:         order.TotalAmount,
+				Currency:       "CNY",
+				Status:         models.PaymentStatusPaid,
+				ChannelTradeNo: "MOCK-" + order.ID,
+				IdempotencyKey: "mock:create:" + order.ID,
+			}
+			now := time.Now()
+			payment.PaidAt = &now
+			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&payment).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"message": "补写支付单失败"})
+				return
+			}
+		}
+
+		now := time.Now()
+		refund := models.RefundOrder{
+			ID:              "REF-" + order.ID,
+			PaymentOrderID:  payment.ID,
+			OrderID:         order.ID,
+			AfterSaleID:     afterSale.ID,
+			Amount:          order.TotalAmount,
+			Reason:          order.RefundReason,
+			Status:          models.RefundStatusSuccess,
+			ChannelRefundNo: "MOCK-REF-" + order.ID,
+			IdempotencyKey:  "mock:refund:" + order.ID,
+			RefundedAt:      &now,
+		}
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&refund).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "创建退款单失败"})
+			return
+		}
+
+		fromStatus := order.Status
+		order.Status = models.OrderStatusRefunded
+		order.PayStatus = models.PayStatusRefunded
+		order.AfterSaleStatus = models.AfterSaleStatusRefunded
 		if err := tx.Save(&order).Error; err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "审核状态更新失败"})
 			return
 		}
 
+		if afterSale.ID != "" {
+			afterSale.Status = models.AfterSaleStatusRefunded
+			afterSale.ApprovedAmount = order.TotalAmount
+			afterSale.RefundID = refund.ID
+			if err := tx.Save(&afterSale).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"message": "更新售后单失败"})
+				return
+			}
+		}
+
 		// 释放物理库存
 		for _, item := range order.Items {
 			var sku models.Sku
-			if err := tx.Set("gorm:query_option", "FOR UPDATE").First(&sku, item.SkuID).Error; err == nil {
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&sku, item.SkuID).Error; err == nil {
 				sku.Stock += item.Quantity
-				tx.Save(&sku)
+				if err := tx.Save(&sku).Error; err != nil {
+					tx.Rollback()
+					c.JSON(http.StatusInternalServerError, gin.H{"message": "回补库存失败"})
+					return
+				}
+				if err := tx.Model(&models.OrderItem{}).Where("id = ?", item.ID).Update("refunded_amount", item.PayableAmount).Error; err != nil {
+					tx.Rollback()
+					c.JSON(http.StatusInternalServerError, gin.H{"message": "更新订单行退款金额失败"})
+					return
+				}
 			}
+		}
+
+		entries := []models.AccountingEntry{
+			{
+				BizType:     "refund",
+				BizID:       refund.ID,
+				AccountType: "sales_refund",
+				Direction:   models.AccountingDirectionDebit,
+				Amount:      refund.Amount,
+				Currency:    "CNY",
+			},
+			{
+				BizType:     "refund",
+				BizID:       refund.ID,
+				AccountType: "cash",
+				Direction:   models.AccountingDirectionCredit,
+				Amount:      refund.Amount,
+				Currency:    "CNY",
+			},
+		}
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&entries).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "保存退款财务分录失败"})
+			return
+		}
+
+		if err := appendOrderStateLog(tx, order.ID, fromStatus, models.OrderStatusRefunded, 0, "AFTERSALE_APPROVED", "商家审核通过并模拟退款"); err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "保存订单状态日志失败"})
+			return
 		}
 
 		// 如果是秒杀订单，额外把缓存库存退回 Redis
@@ -434,19 +928,42 @@ func AuditRefund(c *gin.Context) {
 			}
 		}
 
-		tx.Commit()
+		if err := tx.Commit().Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "提交退款审核事务失败"})
+			return
+		}
 		if core.RedisClient != nil {
 			pushSystemLog(context.Background(), "SUCCESS", fmt.Sprintf("Refund APPROVED for Order %s. Stock restored.", orderID))
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "success", "message": "退款审核通过，已退款并归还库存"})
 	} else if req.Action == "reject" {
-		order.Status = 6 // 退款被拒绝
+		var afterSale models.AfterSaleOrder
+		if err := tx.Where("order_id = ? AND status = ?", order.ID, models.AfterSaleStatusApplying).First(&afterSale).Error; err == nil {
+			afterSale.Status = models.AfterSaleStatusRejected
+			if err := tx.Save(&afterSale).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"message": "更新售后单失败"})
+				return
+			}
+		}
+
+		fromStatus := order.Status
+		order.Status = models.OrderStatusRefundRejected
+		order.AfterSaleStatus = models.AfterSaleStatusRejected
 		if err := tx.Save(&order).Error; err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "审核状态更新失败"})
 			return
 		}
-		tx.Commit()
+		if err := appendOrderStateLog(tx, order.ID, fromStatus, models.OrderStatusRefundRejected, 0, "AFTERSALE_REJECTED", "商家拒绝退款申请"); err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "保存订单状态日志失败"})
+			return
+		}
+		if err := tx.Commit().Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "提交退款审核事务失败"})
+			return
+		}
 		if core.RedisClient != nil {
 			pushSystemLog(context.Background(), "WARN", fmt.Sprintf("Refund REJECTED for Order %s.", orderID))
 		}
@@ -557,21 +1074,35 @@ func processCancelOrder(orderID string) error {
 			return err
 		}
 
-		// 只有待支付状态 (1) 才能取消
-		if order.Status != 1 {
+		// 只有待支付状态才能取消
+		if order.Status != models.OrderStatusPendingPayment {
 			return nil // 状态已被更改（如已支付），属于正常流程，直接成功
 		}
 
-		// 更新为已取消状态 (3)
-		order.Status = 3
+		// 更新为已取消状态
+		fromStatus := order.Status
+		order.Status = models.OrderStatusCanceled
 		if err := tx.Save(&order).Error; err != nil {
+			return err
+		}
+		if order.UserCouponID > 0 {
+			now := time.Now()
+			if err := tx.Model(&models.UserCoupon{}).Where("id = ? AND status = ?", order.UserCouponID, 1).Updates(map[string]interface{}{
+				"status":     0,
+				"used_at":    nil,
+				"updated_at": now,
+			}).Error; err != nil {
+				return err
+			}
+		}
+		if err := appendOrderStateLog(tx, order.ID, fromStatus, models.OrderStatusCanceled, order.UserID, "ORDER_TIMEOUT_CANCELED", "支付超时自动取消并释放库存"); err != nil {
 			return err
 		}
 
 		// 释放锁定的物理库存
 		for _, item := range order.Items {
 			var sku models.Sku
-			if err := tx.Set("gorm:query_option", "FOR UPDATE").First(&sku, item.SkuID).Error; err == nil {
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&sku, item.SkuID).Error; err == nil {
 				sku.Stock += item.Quantity
 				if err := tx.Save(&sku).Error; err != nil {
 					return err
@@ -663,23 +1194,39 @@ func Seckill(c *gin.Context) {
 
 	if core.DB != nil {
 		// 秒杀订单价格固定为 399.00元 (39900分)
+		payExpireAt := time.Now().Add(15 * time.Second)
 		order := models.Order{
-			ID:            orderID,
-			UserID:        userID,
-			TotalAmount:   39900,
-			Status:        1,
-			ReceiverName:  "秒杀快捷收货",
-			ReceiverPhone: "13800000000",
-			ReceiverAddr:  "虚拟网络秒杀节点",
+			ID:                orderID,
+			UserID:            userID,
+			TotalAmount:       39900,
+			GoodsOriginAmount: 39900,
+			PayableAmount:     39900,
+			Status:            models.OrderStatusPendingPayment,
+			PayStatus:         models.PayStatusUnpaid,
+			AfterSaleStatus:   models.AfterSaleStatusNone,
+			ReceiverName:      "秒杀快捷收货",
+			ReceiverPhone:     "13800000000",
+			ReceiverAddr:      "虚拟网络秒杀节点",
+			PayExpireAt:       &payExpireAt,
 		}
 		if err := core.DB.Create(&order).Error; err == nil {
 			orderItem := models.OrderItem{
-				OrderID:  orderID,
-				SkuID:    1,
-				Price:    39900,
-				Quantity: 1,
+				OrderID:       orderID,
+				SkuID:         1,
+				Price:         39900,
+				Quantity:      1,
+				OriginAmount:  39900,
+				PayableAmount: 39900,
 			}
 			core.DB.Create(&orderItem)
+			core.DB.Create(&models.OrderStateLog{
+				OrderID:      orderID,
+				ToStatus:     models.OrderStatusPendingPayment,
+				OperatorType: 1,
+				OperatorID:   userID,
+				Event:        "SECKILL_ORDER_CREATED",
+				Remark:       "秒杀订单创建并预扣 Redis 库存",
+			})
 		}
 	}
 

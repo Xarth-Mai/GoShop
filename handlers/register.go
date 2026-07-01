@@ -26,6 +26,7 @@ func RegisterRoutes(r *gin.Engine) {
 
 		// 2. 公开业务查询接口
 		api.GET("/coupons", GetCoupons)
+		api.POST("/payments/callback/mock", MockPaymentCallback)
 
 		// 3. 鉴权与安全防护核心路由组 (引入 Token 验证、限流、以及防篡改防重放签名校验)
 		protected := api.Group("")

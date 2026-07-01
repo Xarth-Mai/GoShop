@@ -25,6 +25,9 @@ func InitDB() error {
 	if err != nil {
 		return err
 	}
+	if err := migrateLegacyOrderStatuses(DB); err != nil {
+		return err
+	}
 
 	// 数据库自动迁移
 	err = DB.AutoMigrate(
@@ -34,6 +37,14 @@ func InitDB() error {
 		&models.Sku{},
 		&models.Order{},
 		&models.OrderItem{},
+		&models.OrderPromotionAllocation{},
+		&models.OrderStateLog{},
+		&models.PaymentOrder{},
+		&models.PaymentTransaction{},
+		&models.RefundOrder{},
+		&models.AccountingEntry{},
+		&models.AfterSaleOrder{},
+		&models.AfterSaleItem{},
 		&models.Address{},
 		&models.Coupon{},
 		&models.UserCoupon{},
@@ -70,5 +81,22 @@ func InitDB() error {
 		ReplicaDB = DB
 	}
 
+	return nil
+}
+
+func migrateLegacyOrderStatuses(db *gorm.DB) error {
+	statements := []string{
+		"UPDATE orders SET status = 10, pay_status = 0, after_sale_status = 0 WHERE status = 1",
+		"UPDATE orders SET status = 20, pay_status = 20, after_sale_status = 0 WHERE status = 2",
+		"UPDATE orders SET status = 60 WHERE status = 3",
+		"UPDATE orders SET status = 110, pay_status = 20, after_sale_status = 10 WHERE status = 4",
+		"UPDATE orders SET status = 120, pay_status = 40, after_sale_status = 70 WHERE status = 5",
+		"UPDATE orders SET status = 130, pay_status = 20, after_sale_status = 30 WHERE status = 6",
+	}
+	for _, stmt := range statements {
+		if err := db.Exec(stmt).Error; err != nil {
+			return err
+		}
+	}
 	return nil
 }
