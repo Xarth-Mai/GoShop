@@ -49,9 +49,16 @@ start_services() {
     touch "${PID_FILE}"
 
     # 优先启动 NATS JetStream 服务
+    NATS_BIN=""
     if [ -f "${PROJECT_ROOT}/bin/nats-server" ]; then
-        echo "🚀 启动 nATS JetStream (端口: 4222) -> 日志: logs/nats-server.log"
-        nohup "${PROJECT_ROOT}/bin/nats-server" -js > "${LOG_DIR}/nats-server.log" 2>&1 &
+        NATS_BIN="${PROJECT_ROOT}/bin/nats-server"
+    elif command -v nats-server &> /dev/null; then
+        NATS_BIN="nats-server"
+    fi
+
+    if [ -n "${NATS_BIN}" ]; then
+        echo "🚀 启动 NATS JetStream (端口: 4222) -> 日志: logs/nats-server.log"
+        nohup "${NATS_BIN}" -js > "${LOG_DIR}/nats-server.log" 2>&1 &
         PID=$!
         echo "nats-server:${PID}" >> "${PID_FILE}"
         sleep 0.5
