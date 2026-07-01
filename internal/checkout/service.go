@@ -2,8 +2,8 @@ package checkout
 
 import (
 	"fmt"
-	"time"
 
+	"GoShop/internal/promotion"
 	"GoShop/models"
 
 	"gorm.io/gorm"
@@ -116,54 +116,21 @@ func (s Service) Calculate(userID uint, req PreviewRequest) (Preview, error) {
 }
 
 func (s Service) couponCandidates(userID, selectedUserCouponID uint, subtotal int) []CouponCandidate {
-	now := time.Now()
-	query := s.DB.Preload("Coupon").
-		Joins("JOIN coupons ON coupons.id = user_coupons.coupon_id").
-		Where("user_coupons.user_id = ? AND user_coupons.status = ? AND coupons.end_time >= ?", userID, 0, now)
-	if selectedUserCouponID > 0 {
-		query = query.Or("user_coupons.id = ? AND user_coupons.user_id = ?", selectedUserCouponID, userID)
-	}
-
-	var userCoupons []models.UserCoupon
-	if err := query.Find(&userCoupons).Error; err != nil {
-		return nil
-	}
-
-	candidates := make([]CouponCandidate, 0, len(userCoupons))
-	for _, userCoupon := range userCoupons {
-		candidate := CouponCandidate{UserCouponID: userCoupon.ID, Available: true}
-		if userCoupon.Status != 0 {
-			candidate.Available = false
-			candidate.Reason = "优惠券已使用或已失效"
-		} else if userCoupon.Coupon.StartTime.After(now) || userCoupon.Coupon.EndTime.Before(now) {
-			candidate.Available = false
-			candidate.Reason = "优惠券不在有效期内"
-		} else if subtotal < userCoupon.Coupon.MinAmount {
-			candidate.Available = false
-			candidate.Reason = fmt.Sprintf("未达到满 %d 元使用门槛", userCoupon.Coupon.MinAmount/100)
-		} else {
-			candidate.DiscountAmount = couponDiscount(userCoupon.Coupon, subtotal)
-		}
-		candidates = append(candidates, candidate)
+	promotionCandidates := promotion.NewService(s.DB).CouponCandidates(userID, selectedUserCouponID, subtotal)
+	candidates := make([]CouponCandidate, 0, len(promotionCandidates))
+	for _, candidate := range promotionCandidates {
+		candidates = append(candidates, CouponCandidate{
+			UserCouponID:   candidate.UserCouponID,
+			Available:      candidate.Available,
+			Reason:         candidate.Reason,
+			DiscountAmount: candidate.DiscountAmount,
+		})
 	}
 	return candidates
 }
 
 func couponDiscount(coupon models.Coupon, subtotal int) int {
-	discount := 0
-	switch coupon.Type {
-	case 1, 3:
-		discount = coupon.Value
-	case 2:
-		discount = subtotal * (100 - coupon.Value) / 100
-	}
-	if discount > subtotal {
-		return subtotal
-	}
-	if discount < 0 {
-		return 0
-	}
-	return discount
+	return promotion.CouponDiscount(coupon, subtotal)
 }
 
 func allocateDiscount(items []ItemPreview, discount int) {

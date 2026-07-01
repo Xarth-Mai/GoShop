@@ -15,6 +15,11 @@ type ReserveItem struct {
 	Quantity int
 }
 
+type RestockItem struct {
+	SkuID    uint
+	Quantity int
+}
+
 type Service struct {
 	DB *gorm.DB
 }
@@ -29,22 +34,42 @@ func (s Service) ReserveStock(tx *gorm.DB, orderID string, userID uint, items []
 			return fmt.Errorf("库存预占数量必须大于 0")
 		}
 
-		inv, err := ensureInventory(tx, item.SkuID)
-		if err != nil {
-			return err
-		}
-		if inv.Available < item.Quantity {
-			return fmt.Errorf("SKU %d 库存不足，仅剩 %d 件", item.SkuID, inv.Available)
-		}
-
-		inv.Available -= item.Quantity
-		inv.Reserved += item.Quantity
-		inv.Version++
-		if err := tx.Save(&inv).Error; err != nil {
-			return err
-		}
-
 		reservationID := ReservationID(orderID, item.SkuID)
+		var existing models.InventoryReservation
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&existing, "id = ?", reservationID).Error
+		if err == nil {
+			if existing.Status == models.ReservationStatusReserved || existing.Status == models.ReservationStatusConfirmed {
+				continue
+			}
+			return fmt.Errorf("SKU %d 已存在不可重复预占的库存记录", item.SkuID)
+		}
+		if err != gorm.ErrRecordNotFound {
+			return err
+		}
+
+		if _, err := ensureInventory(tx, item.SkuID); err != nil {
+			return err
+		}
+
+		result := tx.Model(&models.SkuInventory{}).
+			Where("sku_id = ? AND available >= ?", item.SkuID, item.Quantity).
+			Updates(map[string]interface{}{
+				"available":  gorm.Expr("available - ?", item.Quantity),
+				"reserved":   gorm.Expr("reserved + ?", item.Quantity),
+				"version":    gorm.Expr("version + 1"),
+				"updated_at": time.Now(),
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			var inv models.SkuInventory
+			if err := tx.First(&inv, "sku_id = ?", item.SkuID).Error; err == nil {
+				return fmt.Errorf("SKU %d 库存不足，仅剩 %d 件", item.SkuID, inv.Available)
+			}
+			return fmt.Errorf("SKU %d 库存不足", item.SkuID)
+		}
+
 		reservation := models.InventoryReservation{
 			ID:       reservationID,
 			OrderID:  orderID,
@@ -54,7 +79,7 @@ func (s Service) ReserveStock(tx *gorm.DB, orderID string, userID uint, items []
 			Status:   models.ReservationStatusReserved,
 			ExpireAt: expireAt,
 		}
-		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&reservation).Error; err != nil {
+		if err := tx.Create(&reservation).Error; err != nil {
 			return err
 		}
 		if err := journal(tx, item.SkuID, orderID, reservationID, "RESERVE", item.Quantity); err != nil {
@@ -152,6 +177,31 @@ func (s Service) RestockSoldForOrder(tx *gorm.DB, orderID string) error {
 			return err
 		}
 		if err := journal(tx, reservation.SkuID, orderID, reservation.ID, "REFUND_RESTOCK", reservation.Quantity); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s Service) RestockItemsForOrder(tx *gorm.DB, orderID string, items []RestockItem) error {
+	for _, item := range items {
+		if item.Quantity <= 0 {
+			return fmt.Errorf("退款回补数量必须大于 0")
+		}
+		inv, err := ensureInventory(tx, item.SkuID)
+		if err != nil {
+			return err
+		}
+		if inv.Sold < item.Quantity {
+			return fmt.Errorf("SKU %d 已售库存不足，无法退款回补", item.SkuID)
+		}
+		inv.Sold -= item.Quantity
+		inv.Available += item.Quantity
+		inv.Version++
+		if err := tx.Save(&inv).Error; err != nil {
+			return err
+		}
+		if err := journal(tx, item.SkuID, orderID, "", "REFUND_RESTOCK", item.Quantity); err != nil {
 			return err
 		}
 	}

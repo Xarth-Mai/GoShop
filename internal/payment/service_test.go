@@ -176,4 +176,82 @@ func TestPaymentService(t *testing.T) {
 			t.Errorf("expected exactly 1 transaction for event, got %d", txCount)
 		}
 	})
+
+	t.Run("HandleMockCallback_AmountMismatchDoesNotPay", func(t *testing.T) {
+		orderID := "ORDER-CB-MISMATCH-03"
+		order := setupPendingOrder(orderID)
+		payment, err := CreateMockPaymentOrder(db, order)
+		if err != nil {
+			t.Fatalf("failed to create payment order: %v", err)
+		}
+
+		_, err = svc.HandleMockCallback(MockCallbackRequest{
+			PaymentOrderID: payment.ID,
+			OrderID:        order.ID,
+			Amount:         payment.Amount - 1,
+			EventID:        "event-amount-mismatch-1003",
+			Status:         "paid",
+		})
+		if err == nil {
+			t.Fatalf("expected amount mismatch error")
+		}
+
+		var updatedOrder models.Order
+		if err := db.First(&updatedOrder, "id = ?", order.ID).Error; err != nil {
+			t.Fatalf("failed to query order: %v", err)
+		}
+		if updatedOrder.Status != models.OrderStatusPendingPayment || updatedOrder.PayStatus != models.PayStatusUnpaid {
+			t.Fatalf("expected order to remain pending, got status=%d pay=%d", updatedOrder.Status, updatedOrder.PayStatus)
+		}
+		var transaction models.PaymentTransaction
+		if err := db.First(&transaction, "channel_event_id = ?", "event-amount-mismatch-1003").Error; err != nil {
+			t.Fatalf("failed to query failed transaction: %v", err)
+		}
+		if transaction.ProcessStatus != models.TransactionStatusFailed {
+			t.Fatalf("expected failed transaction status, got %d", transaction.ProcessStatus)
+		}
+	})
+
+	t.Run("PayMockOrder_ConfirmsLockedCoupon", func(t *testing.T) {
+		orderID := "ORDER-PAY-COUPON-04"
+		order := setupPendingOrder(orderID)
+		now := time.Now()
+		coupon := models.Coupon{
+			ID:        30,
+			Name:      "Payment Coupon",
+			Type:      3,
+			Value:     1000,
+			StartTime: now.Add(-time.Hour),
+			EndTime:   now.Add(time.Hour),
+		}
+		if err := db.Create(&coupon).Error; err != nil {
+			t.Fatalf("failed to create coupon: %v", err)
+		}
+		userCoupon := models.UserCoupon{
+			ID:            30,
+			UserID:        userID,
+			CouponID:      coupon.ID,
+			Status:        models.UserCouponStatusLocked,
+			LockedOrderID: order.ID,
+			LockedAt:      &now,
+		}
+		if err := db.Create(&userCoupon).Error; err != nil {
+			t.Fatalf("failed to create user coupon: %v", err)
+		}
+		if err := db.Model(&models.Order{}).Where("id = ?", order.ID).Update("user_coupon_id", userCoupon.ID).Error; err != nil {
+			t.Fatalf("failed to attach coupon to order: %v", err)
+		}
+
+		if _, err := svc.PayMockOrder(userID, order.ID); err != nil {
+			t.Fatalf("PayMockOrder failed: %v", err)
+		}
+
+		var updatedCoupon models.UserCoupon
+		if err := db.First(&updatedCoupon, "id = ?", userCoupon.ID).Error; err != nil {
+			t.Fatalf("failed to query coupon: %v", err)
+		}
+		if updatedCoupon.Status != models.UserCouponStatusUsed || updatedCoupon.UsedAt == nil || updatedCoupon.LockedOrderID != "" {
+			t.Fatalf("expected coupon confirmed used, got status=%d usedAt=%v lockedOrder=%q", updatedCoupon.Status, updatedCoupon.UsedAt, updatedCoupon.LockedOrderID)
+		}
+	})
 }

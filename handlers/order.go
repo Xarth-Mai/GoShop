@@ -51,8 +51,15 @@ type MockPaymentCallbackReq struct {
 }
 
 type RefundReq struct {
-	RefundReason string `json:"refundReason" binding:"required"`
-	RefundProof  string `json:"refundProof"`
+	Type         int             `json:"type"`
+	RefundReason string          `json:"refundReason" binding:"required"`
+	RefundProof  string          `json:"refundProof"`
+	Items        []RefundItemReq `json:"items"`
+}
+
+type RefundItemReq struct {
+	OrderItemID uint `json:"orderItemId" binding:"required"`
+	Quantity    int  `json:"quantity" binding:"required"`
 }
 
 type AuditRefundReq struct {
@@ -65,6 +72,31 @@ type DelayTask struct {
 	OrderID   string `json:"orderId"`
 	ExecuteAt int64  `json:"executeAt"`
 }
+
+const (
+	orderDelayQueueKey           = "delay:order_payment_timeout"
+	orderDelayProcessingKey      = "delay:order_payment_timeout:processing"
+	delayTaskLeaseSeconds        = 30
+	delayTaskClaimLimit          = 50
+	seckillPendingPaymentSeconds = 15
+)
+
+const claimDelayTasksLua = `
+local source = KEYS[1]
+local processing = KEYS[2]
+local now = tonumber(ARGV[1])
+local lease_until = tonumber(ARGV[2])
+local limit = tonumber(ARGV[3])
+
+local items = redis.call('zrangebyscore', source, '-inf', now, 'LIMIT', 0, limit)
+for _, item in ipairs(items) do
+  local removed = redis.call('zrem', source, item)
+  if removed == 1 then
+    redis.call('zadd', processing, lease_until, item)
+  end
+end
+return items
+`
 
 // LogItem 用于秒杀监控面板日志
 type LogItem struct {
@@ -96,7 +128,7 @@ func enqueueOrderPaymentTimeout(orderID string, executeAt time.Time) {
 		ExecuteAt: executeAt.Unix(),
 	}
 	bytes, _ := json.Marshal(task)
-	core.RedisClient.ZAdd(ctx, "delay:order_payment_timeout", redis.Z{
+	core.RedisClient.ZAdd(ctx, orderDelayQueueKey, redis.Z{
 		Score:  float64(task.ExecuteAt),
 		Member: string(bytes),
 	})
@@ -111,7 +143,7 @@ func removeOrderDelayTasks(orderID string) {
 	core.RedisClient.ZRem(ctx, "seckill:delay_queue", orderID)
 	core.RedisClient.ZRem(ctx, "seckill:delay_queue:processing", orderID)
 
-	for _, key := range []string{"delay:order_payment_timeout", "delay:order_payment_timeout:processing"} {
+	for _, key := range []string{orderDelayQueueKey, orderDelayProcessingKey} {
 		items, _ := core.RedisClient.ZRange(ctx, key, 0, -1).Result()
 		for _, item := range items {
 			if delayTaskOrderID(item) == orderID {
@@ -402,9 +434,15 @@ func ApplyRefund(c *gin.Context) {
 		return
 	}
 
+	applyItems := make([]aftersalesvc.ApplyItem, 0, len(req.Items))
+	for _, item := range req.Items {
+		applyItems = append(applyItems, aftersalesvc.ApplyItem{OrderItemID: item.OrderItemID, Quantity: item.Quantity})
+	}
 	err := aftersalesvc.NewService(core.DB).ApplyRefund(userID, orderID, aftersalesvc.ApplyRequest{
+		Type:         req.Type,
 		RefundReason: req.RefundReason,
 		RefundProof:  req.RefundProof,
+		Items:        applyItems,
 	})
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -468,14 +506,18 @@ func StartReliableDelayQueueWorker() {
 	ticker := time.NewTicker(1 * time.Second)
 	ctx := context.Background()
 	log.Println("[INFO] 高可用延迟队列 Worker 已启动...")
+	lastSweep := time.Now()
 
 	for range ticker.C {
 		if core.RedisClient == nil || core.DB == nil {
 			continue
 		}
 
-		processDelayQueue(ctx, "delay:order_payment_timeout", "delay:order_payment_timeout:processing")
-		processDelayQueue(ctx, "seckill:delay_queue", "seckill:delay_queue:processing")
+		processDelayQueue(ctx, orderDelayQueueKey, orderDelayProcessingKey)
+		if time.Since(lastSweep) >= time.Minute {
+			sweepExpiredPendingOrders(ctx)
+			lastSweep = time.Now()
+		}
 	}
 }
 
@@ -496,18 +538,9 @@ func processCancelOrder(orderID string) error {
 
 func processDelayQueue(ctx context.Context, sourceKey, processingKey string) {
 	now := time.Now().Unix()
-	members, err := core.RedisClient.ZRangeByScore(ctx, sourceKey, &redis.ZRangeBy{
-		Min: "-inf",
-		Max: fmt.Sprintf("%d", now),
-	}).Result()
-	fromProcessing := false
+	members, err := claimDelayTasks(ctx, sourceKey, processingKey, now)
 	if err != nil || len(members) == 0 {
-		staleTime := time.Now().Add(-30 * time.Second).Unix()
-		members, err = core.RedisClient.ZRangeByScore(ctx, processingKey, &redis.ZRangeBy{
-			Min: "-inf",
-			Max: fmt.Sprintf("%d", staleTime),
-		}).Result()
-		fromProcessing = true
+		members, err = claimDelayTasks(ctx, processingKey, processingKey, now)
 		if err != nil || len(members) == 0 {
 			return
 		}
@@ -515,18 +548,6 @@ func processDelayQueue(ctx context.Context, sourceKey, processingKey string) {
 
 	for _, member := range members {
 		orderID := delayTaskOrderID(member)
-		removed := int64(0)
-		if !fromProcessing {
-			removed, _ = core.RedisClient.ZRem(ctx, sourceKey, member).Result()
-		}
-		if removed == 0 && !fromProcessing {
-			continue
-		}
-
-		core.RedisClient.ZAdd(ctx, processingKey, redis.Z{
-			Score:  float64(time.Now().Unix() + 30),
-			Member: member,
-		})
 
 		if err := processCancelOrder(orderID); err != nil {
 			retryKey := "retry:count:" + orderID
@@ -549,6 +570,46 @@ func processDelayQueue(ctx context.Context, sourceKey, processingKey string) {
 
 		core.RedisClient.ZRem(ctx, processingKey, member)
 		core.RedisClient.Del(ctx, "retry:count:"+orderID)
+	}
+}
+
+func claimDelayTasks(ctx context.Context, sourceKey, processingKey string, now int64) ([]string, error) {
+	leaseUntil := now + delayTaskLeaseSeconds
+	res, err := core.RedisClient.Eval(ctx, claimDelayTasksLua, []string{sourceKey, processingKey}, now, leaseUntil, delayTaskClaimLimit).Result()
+	if err != nil {
+		return nil, err
+	}
+	switch items := res.(type) {
+	case []interface{}:
+		members := make([]string, 0, len(items))
+		for _, item := range items {
+			if member, ok := item.(string); ok {
+				members = append(members, member)
+			}
+		}
+		return members, nil
+	case []string:
+		return items, nil
+	default:
+		return nil, nil
+	}
+}
+
+func sweepExpiredPendingOrders(ctx context.Context) {
+	var orders []models.Order
+	if err := core.DB.Select("id").
+		Where("status = ? AND pay_expire_at IS NOT NULL AND pay_expire_at < ?", models.OrderStatusPendingPayment, time.Now()).
+		Limit(100).
+		Find(&orders).Error; err != nil {
+		log.Printf("[Worker] 超时订单兜底扫描失败: %v", err)
+		return
+	}
+	for _, order := range orders {
+		if err := processCancelOrder(order.ID); err != nil {
+			log.Printf("[Worker] 超时订单 %s 兜底取消失败: %v", order.ID, err)
+		} else {
+			pushSystemLog(ctx, "WARN", fmt.Sprintf("Sweep: Order %s expired and was cancelled.", order.ID))
+		}
 	}
 }
 
@@ -620,7 +681,7 @@ func Seckill(c *gin.Context) {
 
 	if core.DB != nil {
 		// 秒杀订单价格固定为 399.00元 (39900分)
-		payExpireAt := time.Now().Add(15 * time.Second)
+		payExpireAt := time.Now().Add(seckillPendingPaymentSeconds * time.Second)
 		order := models.Order{
 			ID:                orderID,
 			UserID:            userID,
@@ -656,8 +717,8 @@ func Seckill(c *gin.Context) {
 		}
 	}
 
-	// 4. 加入通用延迟队列 (秒杀订单限 15 秒内超时支付，以匹配前端倒计时)
-	enqueueOrderPaymentTimeout(orderID, time.Now().Add(15*time.Second))
+	// 4. 加入通用延迟队列 (秒杀订单限短时间内超时支付，以匹配前端倒计时)
+	enqueueOrderPaymentTimeout(orderID, time.Now().Add(seckillPendingPaymentSeconds*time.Second))
 
 	pushSystemLog(ctx, "INFO", fmt.Sprintf("User %d Valkey Lua pre-decrement SUCCESS. Stock left: %s. Order %s. Pay in 15s.", userID, leftStock, orderID))
 

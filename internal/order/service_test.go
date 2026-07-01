@@ -117,7 +117,7 @@ func TestCreateOrder_CouponValidation(t *testing.T) {
 		}
 	})
 
-	t.Run("Valid Coupon - Success and Consume Coupon", func(t *testing.T) {
+	t.Run("Valid Coupon - Success and Lock Coupon", func(t *testing.T) {
 		// 创建一张新的有效无门槛券
 		now := time.Now()
 		validCoupon := models.Coupon{
@@ -158,16 +158,82 @@ func TestCreateOrder_CouponValidation(t *testing.T) {
 			t.Errorf("expected order ID to be returned, got empty")
 		}
 
-		// 检查优惠券状态，应该更新为已使用 (status=1)
+		// 创建订单只锁定优惠券，支付成功后才确认使用。
 		var uc models.UserCoupon
 		if err := db.First(&uc, "id = ?", 11).Error; err != nil {
 			t.Fatalf("failed to check user coupon state: %v", err)
 		}
-		if uc.Status != 1 {
-			t.Errorf("expected user coupon status to be 1 (used), got %d", uc.Status)
+		if uc.Status != models.UserCouponStatusLocked {
+			t.Errorf("expected user coupon status to be locked, got %d", uc.Status)
 		}
-		if uc.UsedAt == nil {
-			t.Errorf("expected user coupon UsedAt to be populated, got nil")
+		if uc.LockedOrderID != res.OrderID {
+			t.Errorf("expected locked order %s, got %s", res.OrderID, uc.LockedOrderID)
+		}
+		if uc.UsedAt != nil {
+			t.Errorf("expected user coupon UsedAt to stay nil before payment")
+		}
+	})
+
+	t.Run("Cancel Pending Order Releases Coupon Lock", func(t *testing.T) {
+		now := time.Now()
+		coupon := models.Coupon{
+			ID:        12,
+			Name:      "Cancel Release Coupon",
+			Type:      3,
+			Value:     1000,
+			StartTime: now.Add(-1 * time.Hour),
+			EndTime:   now.Add(1 * time.Hour),
+		}
+		if err := db.Create(&coupon).Error; err != nil {
+			t.Fatalf("failed to create coupon: %v", err)
+		}
+		userCoupon := models.UserCoupon{ID: 12, UserID: userID, CouponID: coupon.ID, Status: models.UserCouponStatusAvailable}
+		if err := db.Create(&userCoupon).Error; err != nil {
+			t.Fatalf("failed to create user coupon: %v", err)
+		}
+
+		res, err := svc.CreateOrder(userID, CreateRequest{
+			Items:        []checkout.ItemReq{{SkuID: 1, Quantity: 1}},
+			AddressID:    addressID,
+			UserCouponID: 12,
+		})
+		if err != nil {
+			t.Fatalf("CreateOrder failed: %v", err)
+		}
+		if err := svc.CancelPendingOrder(res.OrderID, "test cancel"); err != nil {
+			t.Fatalf("CancelPendingOrder failed: %v", err)
+		}
+
+		var uc models.UserCoupon
+		if err := db.First(&uc, "id = ?", 12).Error; err != nil {
+			t.Fatalf("failed to check user coupon: %v", err)
+		}
+		if uc.Status != models.UserCouponStatusAvailable || uc.LockedOrderID != "" || uc.LockedAt != nil {
+			t.Fatalf("expected coupon lock released, got status=%d lockedOrder=%q lockedAt=%v", uc.Status, uc.LockedOrderID, uc.LockedAt)
+		}
+	})
+
+	t.Run("Paid Order Is Not Canceled", func(t *testing.T) {
+		order := models.Order{
+			ID:            "ORDER-PAID-NOT-CANCEL",
+			UserID:        userID,
+			TotalAmount:   1000,
+			PayableAmount: 1000,
+			Status:        models.OrderStatusPaid,
+			PayStatus:     models.PayStatusPaid,
+		}
+		if err := db.Create(&order).Error; err != nil {
+			t.Fatalf("failed to create paid order: %v", err)
+		}
+		if err := svc.CancelPendingOrder(order.ID, "should be ignored"); err != nil {
+			t.Fatalf("CancelPendingOrder failed: %v", err)
+		}
+		var got models.Order
+		if err := db.First(&got, "id = ?", order.ID).Error; err != nil {
+			t.Fatalf("failed to fetch order: %v", err)
+		}
+		if got.Status != models.OrderStatusPaid {
+			t.Fatalf("expected paid order status unchanged, got %d", got.Status)
 		}
 	})
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"GoShop/internal/inventory"
+	"GoShop/internal/promotion"
 	"GoShop/models"
 
 	"gorm.io/gorm"
@@ -84,43 +85,29 @@ func (s Service) GetPaymentOrder(userID uint, paymentOrderID string) (models.Pay
 }
 
 func (s Service) PayMockOrder(userID uint, orderID string) (PayResult, error) {
-	var result PayResult
-	err := s.DB.Transaction(func(tx *gorm.DB) error {
-		var order models.Order
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&order, "id = ? AND user_id = ?", orderID, userID).Error; err != nil {
-			return err
-		}
-		result.OrderID = order.ID
-		result.PaymentOrderID = PaymentOrderID(order.ID)
+	result := PayResult{OrderID: orderID, PaymentOrderID: PaymentOrderID(orderID)}
+	paymentResult, err := s.CreateOrGetPaymentOrder(userID, orderID)
+	if err != nil {
+		return result, err
+	}
+	result.PaymentOrderID = paymentResult.PaymentOrderID
 
-		if order.Status == models.OrderStatusPaid && order.PayStatus == models.PayStatusPaid {
-			result.AlreadyPaid = true
-			return nil
-		}
-		if order.Status != models.OrderStatusPendingPayment || order.PayStatus != models.PayStatusUnpaid {
-			return fmt.Errorf("当前订单状态不可支付")
-		}
+	var order models.Order
+	if err := s.DB.First(&order, "id = ? AND user_id = ?", orderID, userID).Error; err != nil {
+		return result, err
+	}
+	if order.Status == models.OrderStatusPaid && order.PayStatus == models.PayStatusPaid {
+		result.AlreadyPaid = true
+		return result, nil
+	}
 
-		payment, err := CreateMockPaymentOrder(tx, order)
-		if err != nil {
-			return err
-		}
-		result.PaymentOrderID = payment.ID
-
-		eventID := "mock-pay:" + payment.ID
-		transaction := models.PaymentTransaction{
-			PaymentOrderID: payment.ID,
-			Channel:        models.PaymentChannelMock,
-			ChannelEventID: eventID,
-			EventType:      "mock.payment.succeeded",
-			RawPayload:     fmt.Sprintf(`{"order_id":"%s","amount":%d}`, order.ID, payment.Amount),
-			ProcessStatus:  models.TransactionStatusProcessed,
-		}
-		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&transaction).Error; err != nil {
-			return err
-		}
-
-		return s.markPaid(tx, order, payment, "MOCK-"+order.ID, "ORDER_PAID", "模拟支付成功并入账")
+	_, err = s.HandleMockCallback(MockCallbackRequest{
+		PaymentOrderID: paymentResult.PaymentOrderID,
+		OrderID:        orderID,
+		Amount:         paymentResult.Amount,
+		EventID:        "mock-pay:" + paymentResult.PaymentOrderID,
+		ChannelTradeNo: "MOCK-" + orderID,
+		Status:         "paid",
 	})
 	return result, err
 }
@@ -251,6 +238,9 @@ func (s Service) markPaid(tx *gorm.DB, order models.Order, payment models.Paymen
 		return err
 	}
 	if err := s.Inventory.ConfirmOrderReservations(tx, order.ID); err != nil {
+		return err
+	}
+	if err := promotion.NewService(tx).ConfirmCouponUsed(tx, order.UserID, order.UserCouponID, order.ID); err != nil {
 		return err
 	}
 

@@ -66,8 +66,6 @@ const metrics = ref({
 const logs = ref<LogItem[]>([])
 const pendingOrders = ref<any[]>([])
 const allOrders = ref<OrderInfo[]>([]) // Local display orders
-const isPaying = ref(false)
-const showSuccessToast = ref(false)
 
 const nowTime = ref(Date.now())
 let timer: any = null
@@ -118,32 +116,6 @@ const getRemainingSeconds = (order: OrderInfo) => {
     : new Date(order.createdAt).getTime()
   const diff = Math.max(0, Math.ceil((limitTime - nowTime.value) / 1000))
   return diff
-}
-
-const handlePay = async (orderId: string) => {
-  isPaying.value = true
-  try {
-    const res = await signedFetch('/api/pay', {
-      method: 'POST',
-      body: JSON.stringify({ orderId })
-    })
-    if (res.ok) {
-      showSuccessToast.value = true
-      // Update local status
-      const order = allOrders.value.find(o => o.id === orderId)
-      if (order) order.status = ORDER_STATUS.PAID
-      
-      await fetchMetrics()
-      await fetchAllOrders()
-      setTimeout(() => {
-        showSuccessToast.value = false
-      }, 3000)
-    }
-  } catch (err) {
-    console.error('订单支付失败:', err)
-  } finally {
-    isPaying.value = false
-  }
 }
 
 const handleReset = async () => {
@@ -344,8 +316,7 @@ onUnmounted(() => {
 
                 <!-- Pay button -->
                 <Button
-                  @click="handlePay(order.id)"
-                  :loading="isPaying"
+                  @click="router.push(`/orders/${order.id}`)"
                   variant="primary"
                   class="pay-btn"
                   v-if="order.status === ORDER_STATUS.PENDING_PAYMENT"
@@ -503,11 +474,6 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
-    </div>
-
-    <!-- Success Toast -->
-    <div v-if="showSuccessToast" class="success-toast">
-      支付成功！订单已被延迟队列移除，完成物理归档。
     </div>
   </div>
 </template>

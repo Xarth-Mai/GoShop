@@ -6,10 +6,14 @@ import (
 
 	"GoShop/internal/checkout"
 	"GoShop/internal/inventory"
+	"GoShop/internal/promotion"
 	"GoShop/models"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
+
+const PendingPaymentTTL = 30 * time.Minute
 
 type CreateRequest = checkout.PreviewRequest
 
@@ -59,7 +63,7 @@ func (s Service) CreateOrder(userID uint, req CreateRequest) (CreateResult, erro
 		}
 
 		orderID := fmt.Sprintf("GS-%d-%d", time.Now().Unix(), time.Now().Nanosecond()%1000)
-		payExpireAt := time.Now().Add(60 * time.Second)
+		payExpireAt := time.Now().Add(PendingPaymentTTL)
 		reserveItems := make([]inventory.ReserveItem, 0, len(preview.Items))
 		for _, item := range preview.Items {
 			reserveItems = append(reserveItems, inventory.ReserveItem{SkuID: item.SkuID, Quantity: item.Quantity})
@@ -101,16 +105,17 @@ func (s Service) CreateOrder(userID uint, req CreateRequest) (CreateResult, erro
 		if err := tx.Create(&order).Error; err != nil {
 			return err
 		}
-		if err := inventory.NewService(tx).ReserveStock(tx, order.ID, userID, reserveItems, payExpireAt); err != nil {
-			return err
-		}
 		if req.UserCouponID > 0 && preview.SelectedUserCouponID > 0 {
-			now := time.Now()
-			if err := tx.Model(&models.UserCoupon{}).
-				Where("id = ? AND user_id = ? AND status = ?", req.UserCouponID, userID, 0).
-				Updates(map[string]interface{}{"status": 1, "used_at": &now, "updated_at": now}).Error; err != nil {
+			discount, err := promotion.NewService(tx).LockCouponForOrder(tx, userID, req.UserCouponID, order.ID, preview.GoodsOriginAmount)
+			if err != nil {
 				return err
 			}
+			if discount != preview.GoodsDiscountAmount {
+				return fmt.Errorf("优惠券金额已变化，请重新试算")
+			}
+		}
+		if err := inventory.NewService(tx).ReserveStock(tx, order.ID, userID, reserveItems, payExpireAt); err != nil {
+			return err
 		}
 
 		if preview.SelectedUserCouponID > 0 && preview.GoodsDiscountAmount > 0 {
@@ -156,7 +161,7 @@ func (s Service) CreateOrder(userID uint, req CreateRequest) (CreateResult, erro
 func (s Service) CancelPendingOrder(orderID, reason string) error {
 	return s.DB.Transaction(func(tx *gorm.DB) error {
 		var order models.Order
-		if err := tx.Preload("Items").First(&order, "id = ?", orderID).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Items").First(&order, "id = ?", orderID).Error; err != nil {
 			return err
 		}
 		if order.Status != models.OrderStatusPendingPayment {
@@ -168,15 +173,8 @@ func (s Service) CancelPendingOrder(orderID, reason string) error {
 		if err := tx.Save(&order).Error; err != nil {
 			return err
 		}
-		if order.UserCouponID > 0 {
-			now := time.Now()
-			if err := tx.Model(&models.UserCoupon{}).Where("id = ? AND status = ?", order.UserCouponID, 1).Updates(map[string]interface{}{
-				"status":     0,
-				"used_at":    nil,
-				"updated_at": now,
-			}).Error; err != nil {
-				return err
-			}
+		if err := promotion.NewService(tx).ReleaseCouponLock(tx, order.UserCouponID, order.ID); err != nil {
+			return err
 		}
 		if err := inventory.NewService(tx).ReleaseOrderReservations(tx, order.ID); err != nil {
 			return err

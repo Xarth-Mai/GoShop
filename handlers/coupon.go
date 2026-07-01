@@ -50,7 +50,7 @@ func GetUserCoupons(c *gin.Context) {
 	// 查询未使用的、且关联的优惠券依然有效的卡券 (status = 0)
 	err := core.ReplicaDB.Preload("Coupon").
 		Joins("JOIN coupons ON coupons.id = user_coupons.coupon_id").
-		Where("user_coupons.user_id = ? AND user_coupons.status = ? AND coupons.end_time >= ?", userID, 0, time.Now()).
+		Where("user_coupons.user_id = ? AND user_coupons.status = ? AND coupons.end_time >= ?", userID, models.UserCouponStatusAvailable, time.Now()).
 		Find(&userCoupons).Error
 
 	if err != nil {
@@ -101,7 +101,7 @@ func ReceiveCoupon(c *gin.Context) {
 	userCoupon := models.UserCoupon{
 		UserID:   userID,
 		CouponID: req.CouponID,
-		Status:   0, // 未使用
+		Status:   models.UserCouponStatusAvailable,
 	}
 	if err := core.DB.Create(&userCoupon).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "领取卡券失败: " + err.Error()})

@@ -6,6 +6,8 @@ import (
 
 	"GoShop/internal/testutil"
 	"GoShop/models"
+
+	"gorm.io/gorm"
 )
 
 func TestInventoryService(t *testing.T) {
@@ -167,5 +169,54 @@ func TestInventoryService(t *testing.T) {
 		}
 
 		tx.Commit()
+	})
+
+	t.Run("ReserveStock_IdempotentForSameOrder", func(t *testing.T) {
+		newOrderID := "TEST-ORDER-1004"
+		expireAt := time.Now().Add(10 * time.Minute)
+		items := []ReserveItem{{SkuID: skuID, Quantity: 3}}
+
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			return svc.ReserveStock(tx, newOrderID, userID, items, expireAt)
+		}); err != nil {
+			t.Fatalf("first ReserveStock failed: %v", err)
+		}
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			return svc.ReserveStock(tx, newOrderID, userID, items, expireAt)
+		}); err != nil {
+			t.Fatalf("second ReserveStock should be idempotent, got: %v", err)
+		}
+
+		var journals int64
+		if err := db.Model(&models.InventoryJournal{}).Where("order_id = ? AND change_type = ?", newOrderID, "RESERVE").Count(&journals).Error; err != nil {
+			t.Fatalf("failed to count reserve journals: %v", err)
+		}
+		if journals != 1 {
+			t.Fatalf("expected one reserve journal after idempotent retry, got %d", journals)
+		}
+	})
+
+	t.Run("RestockItemsForOrder_Partial", func(t *testing.T) {
+		var before models.SkuInventory
+		if err := db.First(&before, "sku_id = ?", skuID).Error; err != nil {
+			t.Fatalf("failed to query inventory before restock: %v", err)
+		}
+		if before.Sold < 2 {
+			t.Fatalf("test setup expected at least 2 sold inventory, got %d", before.Sold)
+		}
+
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			return svc.RestockItemsForOrder(tx, "TEST-ORDER-1001", []RestockItem{{SkuID: skuID, Quantity: 2}})
+		}); err != nil {
+			t.Fatalf("RestockItemsForOrder failed: %v", err)
+		}
+
+		var after models.SkuInventory
+		if err := db.First(&after, "sku_id = ?", skuID).Error; err != nil {
+			t.Fatalf("failed to query inventory after restock: %v", err)
+		}
+		if after.Sold != before.Sold-2 || after.Available != before.Available+2 {
+			t.Fatalf("expected sold -2 and available +2, before=%+v after=%+v", before, after)
+		}
 	})
 }
