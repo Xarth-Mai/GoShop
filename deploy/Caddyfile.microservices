@@ -97,6 +97,13 @@
         Expires "0"
     }
 
+    @swagger path /swagger /swagger/*
+    header @swagger {
+        Cache-Control "no-cache, no-store, must-revalidate"
+        Pragma "no-cache"
+        Expires "0"
+    }
+
     handle {
         root * /opt/GoShop/web/dist
         try_files {path} /index.html
