@@ -2,8 +2,12 @@ package handlers
 
 import (
 	"GoShop/core"
+	_ "GoShop/docs"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 func protectedAPI(r *gin.Engine) *gin.RouterGroup {
@@ -69,6 +73,17 @@ func RegisterOrderServiceRoutes(r *gin.Engine) {
 	protected.POST("/seckill", Seckill)
 
 	r.GET("/api/metrics", GetMetrics)
+
+	r.GET("/swagger", func(c *gin.Context) {
+		c.Redirect(http.StatusMovedPermanently, "/swagger/index.html")
+	})
+	r.GET("/swagger/*any", func(c *gin.Context) {
+		if c.Param("any") == "" || c.Param("any") == "/" {
+			c.Redirect(http.StatusMovedPermanently, "/swagger/index.html")
+			return
+		}
+		ginSwagger.WrapHandler(swaggerFiles.Handler)(c)
+	})
 
 	RegisterInternalRoutes(r)
 }

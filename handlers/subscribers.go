@@ -26,7 +26,7 @@ type PaymentSucceededPayload struct {
 	UserCouponID   uint   `json:"userCouponId"`
 	PaymentOrderID string `json:"paymentOrderId"`
 	Amount         int    `json:"amount"`
-	Channel        string `json:"channel"`
+	Channel        int    `json:"channel"`
 	ChannelTradeNo string `json:"channelTradeNo"`
 }
 

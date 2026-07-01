@@ -10,6 +10,7 @@ import (
 
 	"GoShop/config"
 	"GoShop/core"
+	"GoShop/internal/outbox"
 	"GoShop/models"
 
 	"github.com/gin-gonic/gin"
@@ -67,6 +68,14 @@ func RunService(opts ServiceOptions) {
 	}
 	if opts.Background != nil {
 		go opts.Background()
+	}
+
+	if core.DB != nil && opts.Name != "goshop-scheduler-service" {
+		go func() {
+			time.Sleep(1 * time.Second)
+			core.Logger.Info("Auto starting local outbox publisher", zap.String("service", opts.Name))
+			outbox.NewPublisher(core.DB, core.Logger).Start(context.Background())
+		}()
 	}
 
 	addr := serviceAddr(opts.DefaultPort)

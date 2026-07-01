@@ -56,7 +56,7 @@
         }
     }
 
-    @order path /api/checkout/* /api/orders /api/orders/* /api/metrics
+    @order path /api/checkout/* /api/orders /api/orders/* /api/metrics /swagger /swagger/*
     handle @order {
         reverse_proxy 127.0.0.1:8105 {
             health_uri /health
@@ -85,6 +85,13 @@
 
     @index path / /index.html
     header @index {
+        Cache-Control "no-cache, no-store, must-revalidate"
+        Pragma "no-cache"
+        Expires "0"
+    }
+
+    @api path /api/*
+    header @api {
         Cache-Control "no-cache, no-store, must-revalidate"
         Pragma "no-cache"
         Expires "0"
