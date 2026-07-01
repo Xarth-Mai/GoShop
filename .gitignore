@@ -38,3 +38,7 @@ GoShop
 
 # Untracked Enterprise Plan
 goshop_enterprise_plan.md
+
+# Build and log outputs
+bin/
+logs/
