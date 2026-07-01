@@ -77,7 +77,7 @@ go build -o bin/goshop-scheduler-service ./cmd/goshop-scheduler-service
 
 - Move service-owned tables to separate schemas or databases.
 - Replace direct cross-domain reads with gRPC/HTTP APIs.
-- Add Outbox/Inbox and event consumers for `OrderCreated`, `PaymentSucceeded`, and `OrderCanceled`.
+- Add Inbox-backed idempotent event consumers for `OrderCreated`, `PaymentSucceeded`, and `OrderCanceled`.
 - Replace the Redis Stream outbox publisher with NATS JetStream or RabbitMQ when operating beyond single-node/lightweight deployment.
 - Give each service its own DB user with least privilege.
 - Move shared handlers into service-specific packages as API contracts stabilize.

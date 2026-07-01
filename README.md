@@ -2,7 +2,7 @@
 
 > 一个基于 Go 语言构建的轻量级、高性能通用电商后端系统。
 
-本项目旨在提供一个高并发、高可用的电商基础架构。系统剥离了复杂的微服务治理负担，采用“强力大单体 + 高性能组件”的现代化架构设计，重点攻克了高并发场景下的数据一致性与超卖痛点。
+本项目旨在提供一个高并发、高可用的电商基础架构。系统支持两种运行形态：默认的“模块化单体 + 前端静态托管”，以及基于 `cmd/goshop-*-service` 的单仓库多进程微服务过渡形态。当前重点攻克了交易一致性、库存预占、支付回调幂等、售后退款和轻量级事件发布。
 
 **在线演示：** [https://shop.lzzz.ink](https://shop.lzzz.ink)
 
@@ -25,10 +25,16 @@
 用户下单后“占位”库存，若长时间不支付会导致死锁库存、影响实际商品销售。
 
 * **设计实现：** 引入轻量级异步任务队列，利用 Valkey 的有序集合（ZSet）作为底座。
-* **核心机制：** 订单创建成功后，立刻投递一个异步超时检查任务：普通订单 60 秒、秒杀订单 15 秒，以匹配当前演示环境的支付倒计时。消费者进程在后台平稳消耗队列，在超时触发时校验订单状态。
+* **核心机制：** 订单创建成功后，立刻投递一个异步超时检查任务：普通订单 30 分钟、秒杀订单 15 秒。消费者进程在后台平稳消耗队列，在超时触发时校验订单状态。
 * **务实价值：** 免去了轮询数据库导致的 I/O 损耗。如果用户未支付，系统将自动修改订单状态并安全回滚 Valkey 与 PostgreSQL 中的物理库存，确保业务闭环。
 
-### 3. 基于 PostgreSQL 的高性能分层商品模型
+### 3. 交易闭环与 Outbox 事件总线
+
+* **设计实现：** 普通订单采用“价格试算 -> 优惠券锁定 -> 库存预占 -> 支付单 -> mock 回调 -> 库存确认 -> 售后退款”的统一状态机。
+* **核心机制：** 订单、支付、售后在本地事务内写入 `outbox_events`，调度服务将待发送事件发布到 Redis Stream `goshop:events`。
+* **务实价值：** 单体内保持强事务一致性，同时为后续替换为 NATS JetStream/RabbitMQ 和独立数据库拆分保留稳定事件边界。
+
+### 4. 基于 PostgreSQL 的高性能分层商品模型
 
 通用电商的痛点在于多规格商品（颜色、尺寸等）繁杂的检索与高频变动。
 
@@ -36,12 +42,12 @@
 * **核心机制：** 深度结合 GORM 关联查询，并在外层通过二级缓存（本地缓存 + 分布式缓存）对静态商品详情做多级加速。
 * **务实价值：** 结构设计符合企业级规范，既保证了商品规格灵活拓展的便利性，又规避了频繁多表联查产生的性能包袱。
 
-### 4. JWT 无状态鉴权与工业级安全实践
+### 5. JWT 无状态鉴权与工业级安全实践
 
 * **设计实现：** 全站采用 JWT (JSON Web Token) 实现用户的无状态分布式认证，配合自研 Gin 中间件进行精细化的路由权限拦截与令牌自动续签（Refresh Token）机制。
 * **核心机制：** 在网关/路由层拦截非法数据，敏感字段（如卡密、核心凭证）在 PostgreSQL 内部全部采取高级对称加密（AES）存储，避免数据库意外泄露导致的生产安全事故。
 
-### 5. 现代化后台管理界面（高效的运营支撑与库存监控）
+### 6. 现代化后台管理界面（高效的运营支撑与库存监控）
 
 * **设计实现：** 配套设计自适应、精美的后台管理系统，实现商品 SPU/SKU 管理、订单发货、库存阈值警报以及销售数据可视化。
 * **核心机制：** 基于 RBAC 的动态菜单权限控制，实时展示秒杀/高并发下的 Valkey 库存余量与延迟队列消费状态，提升系统可维护性。
@@ -53,7 +59,7 @@
 * **后端核心:** Go + Gin (轻量极速的 Web 框架，生产环境路由性能卓越)
 * **后台前端:** Vue 3 + Pinia + Vue Router + Vanilla CSS (严格遵循 Anthropic 暖乳白极简设计规范，实现多页面商品选购、购物车及延迟队列秒杀支付链路，深度集成实时技术引擎监控看板)
 * **持久层:** PostgreSQL 14+ + GORM (利用 PG 强大的关系型事务特性存储 SPU/SKU 及订单信息)
-* **缓存与异步组件:** Valkey 7+ (Redis 社区正统分支，负责高并发 Lua 原子扣减库存与异步延迟队列)
+* **缓存与异步组件:** Valkey 7+ (Redis 社区正统分支，负责高并发 Lua 原子扣减库存、异步延迟队列与 Redis Stream 事件发布)
 * **API 规范:** Swagger (利用 `swaggo/swag` 自动化生成可交互的 RESTful API 文档，本地完美渲染)
 
 ---
@@ -102,7 +108,7 @@ cp config.example.yaml config.yaml
    cd ..
    ```
 
-2. **启动 Go 后端服务**：
+2. **启动 Go 后端单体服务**：
 
    ```bash
    go mod tidy
@@ -113,6 +119,24 @@ cp config.example.yaml config.yaml
 
 直接打开浏览器访问以下地址，即可同时访问完整的 API 与前端控制台：
 👉 **[http://localhost:3233](https://shop.lzzz.ink)**
+
+### 5. 微服务过渡形态
+
+当前仓库也提供单机多进程服务入口，适合用 Caddy 按路径反向代理：
+
+```bash
+GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-user-service
+GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-product-service
+GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-order-service
+GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-payment-service
+GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-aftersale-service
+GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-cart-service
+GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-promotion-service
+GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-inventory-service
+GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-scheduler-service
+```
+
+默认端口和 Caddy 路由见 [docs/microservices.md](docs/microservices.md) 与 [deploy/Caddyfile.microservices](deploy/Caddyfile.microservices)。
 
 ---
 
@@ -130,14 +154,16 @@ cp config.example.yaml config.yaml
 
 ```text
 .
-├── api/            # 控制器层 (处理 HTTP 请求、参数接收与 validator 校验)
+├── cmd/            # 多进程微服务入口
 ├── config/         # 配置读取与配置项映射
 ├── core/           # 核心组件初始化 (PostgreSQL 读写分离连接池、Valkey 客户端)
+├── deploy/         # Caddy 与 systemd 部署样例
+├── handlers/       # HTTP 控制器层
+├── internal/       # checkout/order/payment/inventory/promotion/outbox 等领域服务
 ├── models/         # 数据模型层 (GORM 结构体，SPU 与 SKU 关系映射)
-├── service/        # 核心业务逻辑层 (高度抽象的下单事务、Lua 库存扣减、延迟队列任务)
-├── web/            # 后台管理前端项目 (基于 React/Vue 3 与精美 UI 构建)
+├── web/            # Vue 3 前端项目
 ├── docs/           # Swagger 自动生成的接口说明文档文件
 ├── init.sql        # 数据库快速初始化脚本
-└── main.go         # 项目唯一入口
+└── main.go         # 单体入口
 
 ```
