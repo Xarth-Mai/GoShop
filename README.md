@@ -183,7 +183,7 @@ cp config.example.yaml config.yaml
 
 ## 🛠️ 剩余硬拆分工作 (Remaining Hard-Split Work)
 
-当前微服务为**过渡形态**（共享同一个数据库 Schema、相同的 Valkey 实例、底层 Models 和 Handler 包）。若要升级为完全解耦的生产级微服务，仍需完成以下硬拆分工作：
+当前微服务为**过渡形态**（共享同一个数据库 Schema、相同的 Valkey 实例、底层 Models 和 Handler 包）。若要升级为完全解耦的生产级微服务，仍需完成以下硬拆分工作（具体设计路线详见 [物理微服务硬拆分与消息队列演进方案](file:///home/lzzz/MyProjects/GoShop/docs/hard_split_and_mq_plan.md)）：
 
 1. **数据库独立与表拆分**：将各微服务专有表移动到独立的 PostgreSQL Schema 或物理数据库中，为每个微服务配置只拥有自身库/表最小权限的数据库账号。
 2. **跨服务通信改造**：订单服务等目前跨表查询（如查询用户、商品、库存快照）需改写为通过 gRPC / HTTP 接口向相应服务发出请求。
