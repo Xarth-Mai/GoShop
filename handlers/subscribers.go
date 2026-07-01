@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"GoShop/core"
+	"GoShop/internal/inventory"
 	"GoShop/internal/promotion"
 	"GoShop/models"
 
@@ -113,30 +114,7 @@ func RegisterInventoryServiceSubscribers() {
 
 		return core.DB.Transaction(func(tx *gorm.DB) error {
 			return core.ProcessWithInbox(tx, outer.EventID, consumerName, func(dbTx *gorm.DB) error {
-				var reservations []models.InventoryReservation
-				if err := dbTx.Where("order_id = ? AND status = ?", payload.OrderID, models.ReservationStatusReserved).Find(&reservations).Error; err != nil {
-					return err
-				}
-
-				for _, res := range reservations {
-					res.Status = models.ReservationStatusConfirmed
-					if err := dbTx.Save(&res).Error; err != nil {
-						return err
-					}
-
-					// 记录库存变动明细日志
-					journal := models.InventoryJournal{
-						SkuID:         res.SkuID,
-						OrderID:       res.OrderID,
-						ReservationID: res.ID,
-						ChangeType:    "confirm",
-						Quantity:      -res.Quantity,
-					}
-					if err := dbTx.Create(&journal).Error; err != nil {
-						return err
-					}
-				}
-				return nil
+				return inventory.NewService(dbTx).ConfirmOrderReservations(dbTx, payload.OrderID)
 			})
 		})
 	})

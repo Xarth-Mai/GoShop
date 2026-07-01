@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -110,6 +111,15 @@ func GetProduct(c *gin.Context) {
 	if err := core.ReplicaDB.Preload("Skus").First(&product, "id = ? AND status = ?", id, 1).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"message": "商品未找到"})
 		return
+	}
+
+	for i := range product.Skus {
+		var stockResp struct {
+			Available int `json:"available"`
+		}
+		if err := core.CallInternalService(core.ReplicaDB, 8103, "GET", fmt.Sprintf("/api/internal/inventory/skus/%d", product.Skus[i].ID), nil, &stockResp); err == nil {
+			product.Skus[i].Stock = stockResp.Available
+		}
 	}
 
 	c.JSON(http.StatusOK, product)

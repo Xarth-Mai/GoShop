@@ -242,3 +242,11 @@ func journal(tx *gorm.DB, skuID uint, orderID, reservationID, changeType string,
 		Quantity:      quantity,
 	}).Error
 }
+
+func (s Service) GetAvailableStock(tx *gorm.DB, skuID uint) (int, error) {
+	inv, err := ensureInventory(tx, skuID)
+	if err != nil {
+		return 0, err
+	}
+	return inv.Available, nil
+}

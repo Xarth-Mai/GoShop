@@ -45,6 +45,7 @@ func RegisterInternalRoutes(r *gin.Engine) {
 		internal.POST("/inventory/release", internalReleaseStock)
 		internal.POST("/inventory/restock", internalRestockStock)
 		internal.GET("/inventory/reservations/:orderId", internalGetInventoryReservations)
+		internal.GET("/inventory/skus/:skuId", internalGetSkuInventory)
 
 		// 3. 优惠券/营销服务接口
 		internal.POST("/promotion/lock", internalLockCoupon)
@@ -833,4 +834,18 @@ func internalGetCouponCandidates(c *gin.Context) {
 
 	candidates := promotion.NewService(core.ReplicaDB).CouponCandidates(req.UserID, req.SelectedUserCouponID, req.Subtotal)
 	c.JSON(http.StatusOK, candidates)
+}
+
+func internalGetSkuInventory(c *gin.Context) {
+	skuID, err := strconv.Atoi(c.Param("skuId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid sku id"})
+		return
+	}
+	stock, err := inventory.NewService(core.DB).GetAvailableStock(core.DB, uint(skuID))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"available": stock})
 }

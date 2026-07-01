@@ -40,7 +40,7 @@ export const MOCK_PRODUCTS: Product[] = [
     subtitle: '极致性能，为灵感创作而生',
     description: '搭载专为大模型应用优化的新一代芯片，Anthropic Book Pro 拥有超凡的运算能力与极长续航。铝合金一体化机身，搭配暖色背光键盘与高刷视网膜屏幕，让每一次敲击都是灵感的碰撞。',
     price: 899900, // 8999.00
-    image: 'https://images.unsplash.com/photo-1496181130204-755241544e3f?auto=format&fit=crop&w=800&q=80',
+    image: 'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?auto=format&fit=crop&w=800&q=80',
     category: '笔记本',
     tags: ['高效办公', '高分屏', '强劲算力'],
     skus: [

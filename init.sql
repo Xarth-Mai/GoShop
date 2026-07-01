@@ -318,7 +318,7 @@ ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO spus (id, category_id, name, subtitle, description, main_image, images, detail_html, status) VALUES
 (1, 1, 'Claude Phone 1', '懂你的思考伙伴，掌上轻量体验', 'Claude Phone 1 采用极简设计与温暖配色。', 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&w=800&q=80', '["https://images.unsplash.com/photo-1511707171634-5f897ff02aa9"]', '<p>Claude Phone 1 详细介绍内容...</p>', 1),
-(2, 2, 'Anthropic Book Pro', '极致性能，为灵感创作而生', '搭载专为大模型应用优化的新一代芯片。', 'https://images.unsplash.com/photo-1496181130204-755241544e3f?auto=format&fit=crop&w=800&q=80', '["https://images.unsplash.com/photo-1496181130204-755241544e3f"]', '<p>Anthropic Book Pro 详细介绍内容...</p>', 1),
+(2, 2, 'Anthropic Book Pro', '极致性能，为灵感创作而生', '搭载专为大模型应用优化的新一代芯片。', 'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?auto=format&fit=crop&w=800&q=80', '["https://images.unsplash.com/photo-1517694712202-14dd9538aa97"]', '<p>Anthropic Book Pro 详细介绍内容...</p>', 1),
 (3, 3, 'Artifacts Earbuds', '纯净原音，静享心流时刻', '智能主动降噪耳机 Artifacts Earbuds。', 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=800&q=80', '["https://images.unsplash.com/photo-1505740420928-5e560c06d30e"]', '<p>Artifacts Earbuds 详细介绍内容...</p>', 1),
 (4, 4, 'Spike Pad Air', '轻薄随行，创意触手可及', 'Spike Pad Air 只有 6.1 毫米的厚度。', 'https://images.unsplash.com/photo-1544244015-0df4b3ffc6b0?auto=format&fit=crop&w=800&q=80', '["https://images.unsplash.com/photo-1544244015-0df4b3ffc6b0"]', '<p>Spike Pad Air 详细介绍内容...</p>', 1)
 ON CONFLICT (id) DO NOTHING;

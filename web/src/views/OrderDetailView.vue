@@ -10,7 +10,7 @@ const route = useRoute()
 const router = useRouter()
 
 const detail = ref<any | null>(null)
-const loading = ref(false)
+const loading = ref(true)
 const isPaying = ref(false)
 const nowTime = ref(Date.now())
 let clockTimer: any = null
@@ -42,16 +42,16 @@ const remainingSeconds = computed(() => {
 
 const money = (value?: number) => `¥${(((value || 0) / 100).toFixed(2))}`
 
-const fetchDetail = async () => {
+const fetchDetail = async (silent = false) => {
   if (!orderId.value) return
-  loading.value = true
+  if (!silent) loading.value = true
   try {
     const res = await signedFetch(`/api/orders/${orderId.value}`)
     if (res.ok) {
       detail.value = await res.json()
     }
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -64,7 +64,7 @@ const handlePay = async () => {
       body: JSON.stringify({ orderId: order.value.id })
     })
     if (!paymentRes.ok) {
-      await fetchDetail()
+      await fetchDetail(true)
       return
     }
     const res = await signedFetch('/api/pay', {
@@ -72,7 +72,7 @@ const handlePay = async () => {
       body: JSON.stringify({ orderId: order.value.id })
     })
     if (res.ok) {
-      await fetchDetail()
+      await fetchDetail(true)
     }
   } finally {
     isPaying.value = false

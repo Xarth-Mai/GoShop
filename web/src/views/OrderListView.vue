@@ -765,6 +765,7 @@ onUnmounted(() => {
   font-size: 18px;
   margin: 0;
   flex-grow: 1;
+  color: var(--colors-sand-light, #f4ecd8);
 }
 
 .reset-btn {

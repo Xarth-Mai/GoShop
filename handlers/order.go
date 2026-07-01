@@ -78,7 +78,7 @@ const (
 	orderDelayProcessingKey      = "delay:order_payment_timeout:processing"
 	delayTaskLeaseSeconds        = 30
 	delayTaskClaimLimit          = 50
-	seckillPendingPaymentSeconds = 15
+	seckillPendingPaymentSeconds = 60
 )
 
 const claimDelayTasksLua = `
