@@ -12,8 +12,12 @@ const router = useRouter()
 const detail = ref<any | null>(null)
 const loading = ref(true)
 const isPaying = ref(false)
+const isPaymentSettling = ref(false)
 const nowTime = ref(Date.now())
 let clockTimer: any = null
+
+const PAYMENT_SETTLE_POLL_ATTEMPTS = 12
+const PAYMENT_SETTLE_POLL_INTERVAL_MS = 1500
 
 const orderId = computed(() => String(route.params.id || ''))
 const order = computed(() => detail.value?.order)
@@ -40,42 +44,63 @@ const remainingSeconds = computed(() => {
   return Math.max(0, Math.ceil((new Date(order.value.payExpireAt).getTime() - nowTime.value) / 1000))
 })
 
+const payActionLocked = computed(() => isPaying.value || isPaymentSettling.value)
+
 const money = (value?: number) => `¥${(((value || 0) / 100).toFixed(2))}`
+const sleep = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms))
 
 const fetchDetail = async (silent = false) => {
-  if (!orderId.value) return
+  if (!orderId.value) return false
   if (!silent) loading.value = true
   try {
     const res = await signedFetch(`/api/orders/${orderId.value}`)
     if (res.ok) {
       detail.value = await res.json()
+      return true
     }
+    return false
   } finally {
     if (!silent) loading.value = false
   }
 }
 
+const refreshUntilPaymentSettled = async () => {
+  for (let attempt = 0; attempt < PAYMENT_SETTLE_POLL_ATTEMPTS; attempt += 1) {
+    await fetchDetail(true)
+
+    if (!order.value || order.value.status !== 10) {
+      return
+    }
+
+    if (attempt < PAYMENT_SETTLE_POLL_ATTEMPTS - 1) {
+      await sleep(PAYMENT_SETTLE_POLL_INTERVAL_MS)
+    }
+  }
+}
+
 const handlePay = async () => {
-  if (!order.value) return
+  if (!order.value || payActionLocked.value) return
+
+  const payingOrderId = order.value.id
   isPaying.value = true
+  isPaymentSettling.value = true
+
   try {
     const paymentRes = await signedFetch('/api/payments', {
       method: 'POST',
-      body: JSON.stringify({ orderId: order.value.id })
+      body: JSON.stringify({ orderId: payingOrderId })
     })
-    if (!paymentRes.ok) {
-      await fetchDetail(true)
-      return
-    }
-    const res = await signedFetch('/api/pay', {
-      method: 'POST',
-      body: JSON.stringify({ orderId: order.value.id })
-    })
-    if (res.ok) {
-      await fetchDetail(true)
+
+    if (paymentRes.ok) {
+      await signedFetch('/api/pay', {
+        method: 'POST',
+        body: JSON.stringify({ orderId: payingOrderId })
+      })
     }
   } finally {
     isPaying.value = false
+    await refreshUntilPaymentSettled()
+    isPaymentSettling.value = false
   }
 }
 
@@ -159,7 +184,9 @@ onUnmounted(() => {
 
           <div v-if="order.status === 10" class="pay-box">
             <span>剩余 {{ remainingSeconds }} 秒</span>
-            <Button :loading="isPaying" :disabled="remainingSeconds <= 0" @click="handlePay" variant="primary">模拟支付</Button>
+            <Button :loading="payActionLocked" :disabled="remainingSeconds <= 0 || payActionLocked" @click="handlePay" variant="primary">
+              {{ isPaymentSettling ? '确认支付结果中...' : '模拟支付' }}
+            </Button>
           </div>
         </Card>
 
