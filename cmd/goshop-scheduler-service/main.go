@@ -1,8 +1,13 @@
 package main
 
 import (
+	"context"
+	"time"
+
+	"GoShop/core"
 	"GoShop/handlers"
 	"GoShop/internal/app"
+	"GoShop/internal/outbox"
 )
 
 func main() {
@@ -10,6 +15,12 @@ func main() {
 		Name:        "goshop-scheduler-service",
 		DefaultPort: app.EnvInt("GOSHOP_SCHEDULER_PORT", 8109),
 		SeedData:    true,
-		Background:  handlers.StartReliableDelayQueueWorker,
+		Background:  startBackgroundWorkers,
 	})
+}
+
+func startBackgroundWorkers() {
+	go outbox.NewPublisher(core.DB, core.RedisClient, core.Logger).Start(context.Background())
+	time.Sleep(100 * time.Millisecond)
+	handlers.StartReliableDelayQueueWorker()
 }

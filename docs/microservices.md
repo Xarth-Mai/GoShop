@@ -19,7 +19,7 @@ The split is intentionally a transitional service split. Services still share th
 | payment | 8106 | `./cmd/goshop-payment-service` | `/api/pay`, `/api/payments*` |
 | aftersale | 8107 | `./cmd/goshop-aftersale-service` | refund apply/audit routes |
 | cart | 8108 | `./cmd/goshop-cart-service` | `/api/cart*` |
-| scheduler | 8109 | `./cmd/goshop-scheduler-service` | `/health`, `/metrics`, delay worker |
+| scheduler | 8109 | `./cmd/goshop-scheduler-service` | `/health`, `/metrics`, delay worker, outbox publisher |
 
 Each service supports:
 
@@ -43,6 +43,21 @@ GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-scheduler-service
 
 Use `deploy/Caddyfile.microservices` to route the current frontend API paths to these ports without changing the Vue app.
 
+## Event Bus
+
+Transactional business events are written to `outbox_events` in the same database transaction as the state change. The scheduler service polls pending events and publishes them to Redis Stream `goshop:events`, then marks the event as sent.
+
+Current emitted events:
+
+- `OrderCreated`
+- `OrderCanceled`
+- `PaymentSucceeded`
+- `AfterSaleApplied`
+- `AfterSaleRejected`
+- `RefundSucceeded`
+
+This gives the service split a reliable handoff point without adding NATS/RabbitMQ yet. When a dedicated MQ is introduced, replace the Redis Stream publisher while keeping the transactional outbox table and event payloads stable.
+
 ## Build
 
 ```bash
@@ -63,5 +78,6 @@ go build -o bin/goshop-scheduler-service ./cmd/goshop-scheduler-service
 - Move service-owned tables to separate schemas or databases.
 - Replace direct cross-domain reads with gRPC/HTTP APIs.
 - Add Outbox/Inbox and event consumers for `OrderCreated`, `PaymentSucceeded`, and `OrderCanceled`.
+- Replace the Redis Stream outbox publisher with NATS JetStream or RabbitMQ when operating beyond single-node/lightweight deployment.
 - Give each service its own DB user with least privilege.
 - Move shared handlers into service-specific packages as API contracts stabilize.
