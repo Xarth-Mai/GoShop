@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"GoShop/config"
+	"GoShop/models"
 )
 
 // ==========================================
@@ -21,20 +22,30 @@ import (
 type TokenPayload struct {
 	UserID    uint   `json:"userId"`
 	Username  string `json:"username"`
+	Role      string `json:"role"`
 	Exp       int64  `json:"exp"`
 	TokenType string `json:"type"` // "access" 或 "refresh"
 }
 
 // GenerateToken 签发 Token (Access 或 Refresh)
 func GenerateToken(userID uint, username string, duration time.Duration, tokenType string) (string, error) {
+	return GenerateTokenWithRole(userID, username, models.UserRoleUser, duration, tokenType)
+}
+
+// GenerateTokenWithRole 签发带角色信息的 Token。
+func GenerateTokenWithRole(userID uint, username, role string, duration time.Duration, tokenType string) (string, error) {
 	secret := "goshop_jwt_hmac_secret"
 	if config.GlobalConfig != nil && config.GlobalConfig.JWT.Secret != "" {
 		secret = config.GlobalConfig.JWT.Secret
+	}
+	if role == "" {
+		role = models.UserRoleUser
 	}
 
 	payload := TokenPayload{
 		UserID:    userID,
 		Username:  username,
+		Role:      role,
 		Exp:       time.Now().Add(duration).Unix(),
 		TokenType: tokenType,
 	}
@@ -87,6 +98,9 @@ func ParseAndVerifyToken(tokenStr string, expectedType string) (*TokenPayload, e
 	var payload TokenPayload
 	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
 		return nil, errors.New("failed to unmarshal token payload")
+	}
+	if payload.Role == "" {
+		payload.Role = models.UserRoleUser
 	}
 
 	// 校验有效期

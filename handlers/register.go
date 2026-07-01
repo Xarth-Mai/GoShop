@@ -62,7 +62,11 @@ func RegisterRoutes(r *gin.Engine) {
 			protected.POST("/pay", PayOrder)
 
 			// 商家售后退款审核
-			protected.POST("/admin/orders/:id/refund/audit", AuditRefund)
+			admin := protected.Group("/admin")
+			admin.Use(core.AdminRequiredMiddleware())
+			{
+				admin.POST("/orders/:id/refund/audit", AuditRefund)
+			}
 		}
 	}
 }

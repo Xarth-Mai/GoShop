@@ -48,7 +48,7 @@ const handleLogin = async () => {
       return
     }
 
-    authStore.login(data.username || username.value, data.accessToken)
+    authStore.login(data.username || username.value, data.accessToken, data.role || 'user')
 
     const redirectPath = (route.query.redirect as string) || '/'
     router.push(redirectPath)

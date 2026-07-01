@@ -68,6 +68,7 @@ func Register(c *gin.Context) {
 		Username:     req.Username,
 		PasswordHash: string(hashed),
 		Email:        req.Email,
+		Role:         models.UserRoleUser,
 	}
 
 	if err := core.DB.Create(&user).Error; err != nil {
@@ -105,13 +106,13 @@ func Login(c *gin.Context) {
 
 	// 签发 Token
 	cfg := config.GlobalConfig.JWT
-	accessToken, err := core.GenerateToken(user.ID, user.Username, time.Duration(cfg.Expire)*time.Second, "access")
+	accessToken, err := core.GenerateTokenWithRole(user.ID, user.Username, user.Role, time.Duration(cfg.Expire)*time.Second, "access")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "生成访问凭证失败"})
 		return
 	}
 
-	refreshToken, err := core.GenerateToken(user.ID, user.Username, time.Duration(cfg.RefreshExpire)*time.Second, "refresh")
+	refreshToken, err := core.GenerateTokenWithRole(user.ID, user.Username, user.Role, time.Duration(cfg.RefreshExpire)*time.Second, "refresh")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "生成刷新凭证失败"})
 		return
@@ -120,6 +121,7 @@ func Login(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":       "success",
 		"username":     user.Username,
+		"role":         user.Role,
 		"accessToken":  accessToken,
 		"refreshToken": refreshToken,
 	})
@@ -140,7 +142,7 @@ func Refresh(c *gin.Context) {
 	}
 
 	cfg := config.GlobalConfig.JWT
-	newAccessToken, err := core.GenerateToken(payload.UserID, payload.Username, time.Duration(cfg.Expire)*time.Second, "access")
+	newAccessToken, err := core.GenerateTokenWithRole(payload.UserID, payload.Username, payload.Role, time.Duration(cfg.Expire)*time.Second, "access")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "生成访问凭证失败"})
 		return
@@ -148,6 +150,7 @@ func Refresh(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":      "success",
+		"role":        payload.Role,
 		"accessToken": newAccessToken,
 	})
 }

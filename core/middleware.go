@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"GoShop/config"
+	"GoShop/models"
 
 	"github.com/gin-gonic/gin"
 )
@@ -47,6 +48,19 @@ func AuthMiddleware() gin.HandlerFunc {
 		// 将用户信息存入上下文
 		c.Set("userId", payload.UserID)
 		c.Set("username", payload.Username)
+		c.Set("role", payload.Role)
+		c.Next()
+	}
+}
+
+// AdminRequiredMiddleware 要求当前登录用户具备后台管理角色。
+func AdminRequiredMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.GetString("role") != models.UserRoleAdmin {
+			c.JSON(http.StatusForbidden, gin.H{"message": "需要管理员权限"})
+			c.Abort()
+			return
+		}
 		c.Next()
 	}
 }

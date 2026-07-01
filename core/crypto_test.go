@@ -3,6 +3,8 @@ package core
 import (
 	"testing"
 	"time"
+
+	"GoShop/models"
 )
 
 func TestTokenLifecycle(t *testing.T) {
@@ -25,6 +27,9 @@ func TestTokenLifecycle(t *testing.T) {
 		t.Errorf("Token payload values mismatch! Expected ID %d and username %q, got ID %d and %q",
 			userID, username, payload.UserID, payload.Username)
 	}
+	if payload.Role != models.UserRoleUser {
+		t.Errorf("Expected default user role in token payload, got %q", payload.Role)
+	}
 
 	// 3. 校验 Token 类型不匹配 (Expected "refresh" but parsed "access")
 	_, err = ParseAndVerifyToken(token, "refresh")
@@ -40,6 +45,21 @@ func TestTokenLifecycle(t *testing.T) {
 	_, err = ParseAndVerifyToken(expiredToken, "access")
 	if err == nil || err.Error() != "token has expired" {
 		t.Errorf("Expected token expiration error, got: %v", err)
+	}
+}
+
+func TestTokenCarriesRole(t *testing.T) {
+	token, err := GenerateTokenWithRole(7, "admin_user", models.UserRoleAdmin, time.Minute, "access")
+	if err != nil {
+		t.Fatalf("Failed to generate admin token: %v", err)
+	}
+
+	payload, err := ParseAndVerifyToken(token, "access")
+	if err != nil {
+		t.Fatalf("Failed to verify admin token: %v", err)
+	}
+	if payload.Role != models.UserRoleAdmin {
+		t.Fatalf("Expected admin role, got %q", payload.Role)
 	}
 }
 

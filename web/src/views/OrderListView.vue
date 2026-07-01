@@ -5,8 +5,10 @@ import Card from '../components/ui/Card.vue'
 import Button from '../components/ui/Button.vue'
 import Badge from '../components/ui/Badge.vue'
 import { signedFetch } from '../api/request'
+import { useAuthStore } from '../stores/auth'
 
 const router = useRouter()
+const authStore = useAuthStore()
 
 interface OrderItem {
   id: number
@@ -193,6 +195,7 @@ const submitRefund = async () => {
 
 // Simulate Merchant Audit process
 const auditRefund = async (orderId: string, action: 'approve' | 'reject') => {
+  if (!authStore.isAdmin) return
   try {
     const res = await signedFetch(`/api/admin/orders/${orderId}/refund/audit`, {
       method: 'POST',
@@ -426,7 +429,7 @@ onUnmounted(() => {
           </div>
 
           <!-- Merchant Refund Review Desk (Audit Panel) -->
-          <div class="audit-desk-panel" v-if="refundingOrders.length > 0">
+          <div class="audit-desk-panel" v-if="authStore.isAdmin && refundingOrders.length > 0">
             <div class="panel-header">商家退款审核台</div>
             <div class="audit-items-flow">
               <div

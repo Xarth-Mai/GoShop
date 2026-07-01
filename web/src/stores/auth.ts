@@ -4,6 +4,7 @@ import { ref, computed } from 'vue'
 export interface User {
   username: string
   token: string
+  role: string
 }
 
 export const useAuthStore = defineStore('auth', () => {
@@ -13,7 +14,12 @@ export const useAuthStore = defineStore('auth', () => {
   const storedUser = localStorage.getItem('goshop_user')
   if (storedUser) {
     try {
-      user.value = JSON.parse(storedUser)
+      const parsed = JSON.parse(storedUser)
+      user.value = {
+        username: parsed.username,
+        token: parsed.token,
+        role: parsed.role || 'user'
+      }
     } catch {
       localStorage.removeItem('goshop_user')
     }
@@ -21,9 +27,10 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isLoggedIn = computed(() => user.value !== null)
   const token = computed(() => user.value?.token || '')
+  const isAdmin = computed(() => user.value?.role === 'admin')
 
-  function login(username: string, tokenVal: string) {
-    user.value = { username, token: tokenVal }
+  function login(username: string, tokenVal: string, role = 'user') {
+    user.value = { username, token: tokenVal, role }
     localStorage.setItem('goshop_user', JSON.stringify(user.value))
   }
 
@@ -35,6 +42,7 @@ export const useAuthStore = defineStore('auth', () => {
   return {
     user,
     isLoggedIn,
+    isAdmin,
     token,
     login,
     logout
