@@ -291,6 +291,34 @@ func GetOrders(c *gin.Context) {
 	c.JSON(http.StatusOK, orders)
 }
 
+// GetOrderDetail 查询当前登录用户的订单详情聚合信息
+func GetOrderDetail(c *gin.Context) {
+	userIDVal, exists := c.Get("userId")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "未登录"})
+		return
+	}
+	userID := userIDVal.(uint)
+	orderID := c.Param("id")
+
+	if core.DB == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "数据库未就绪"})
+		return
+	}
+
+	detail, err := ordersvc.NewService(core.ReplicaDB).GetOrderDetail(userID, orderID)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"message": "订单不存在"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "查询订单详情失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, detail)
+}
+
 // ApplyRefund 发起订单退款申请
 func ApplyRefund(c *gin.Context) {
 	userIDVal, exists := c.Get("userId")

@@ -19,6 +19,15 @@ type CreateResult struct {
 	TotalAmount int
 }
 
+type Detail struct {
+	Order        models.Order                  `json:"order"`
+	StateLogs    []models.OrderStateLog        `json:"stateLogs"`
+	PaymentOrder *models.PaymentOrder          `json:"paymentOrder,omitempty"`
+	AfterSales   []models.AfterSaleOrder       `json:"afterSales"`
+	RefundOrders []models.RefundOrder          `json:"refundOrders"`
+	Reservations []models.InventoryReservation `json:"reservations"`
+}
+
 type Service struct {
 	DB        *gorm.DB
 	Checkout  checkout.Service
@@ -174,6 +183,36 @@ func (s Service) CancelPendingOrder(orderID, reason string) error {
 		}
 		return appendStateLog(tx, order.ID, fromStatus, models.OrderStatusCanceled, order.UserID, "ORDER_TIMEOUT_CANCELED", reason)
 	})
+}
+
+func (s Service) GetOrderDetail(userID uint, orderID string) (Detail, error) {
+	var detail Detail
+	if err := s.DB.Preload("Items.Sku").First(&detail.Order, "id = ? AND user_id = ?", orderID, userID).Error; err != nil {
+		return detail, err
+	}
+
+	if err := s.DB.Where("order_id = ?", orderID).Order("created_at asc").Find(&detail.StateLogs).Error; err != nil {
+		return detail, err
+	}
+
+	var paymentOrder models.PaymentOrder
+	if err := s.DB.Where("order_id = ?", orderID).Order("created_at desc").First(&paymentOrder).Error; err == nil {
+		detail.PaymentOrder = &paymentOrder
+	} else if err != gorm.ErrRecordNotFound {
+		return detail, err
+	}
+
+	if err := s.DB.Preload("Items").Where("order_id = ?", orderID).Order("created_at desc").Find(&detail.AfterSales).Error; err != nil {
+		return detail, err
+	}
+	if err := s.DB.Where("order_id = ?", orderID).Order("created_at desc").Find(&detail.RefundOrders).Error; err != nil {
+		return detail, err
+	}
+	if err := s.DB.Where("order_id = ?", orderID).Order("created_at asc").Find(&detail.Reservations).Error; err != nil {
+		return detail, err
+	}
+
+	return detail, nil
 }
 
 func appendStateLog(tx *gorm.DB, orderID string, fromStatus, toStatus int, operatorID uint, event, remark string) error {

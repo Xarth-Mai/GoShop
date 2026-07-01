@@ -6,6 +6,7 @@ import CartView from '../views/CartView.vue'
 import CheckoutView from '../views/CheckoutView.vue'
 import LoginView from '../views/LoginView.vue'
 import OrderListView from '../views/OrderListView.vue'
+import OrderDetailView from '../views/OrderDetailView.vue'
 import { useAuthStore } from '../stores/auth'
 
 const routes = [
@@ -39,6 +40,12 @@ const routes = [
         path: 'orders',
         name: 'Orders',
         component: OrderListView,
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'orders/:id',
+        name: 'OrderDetail',
+        component: OrderDetailView,
         meta: { requiresAuth: true }
       }
     ]

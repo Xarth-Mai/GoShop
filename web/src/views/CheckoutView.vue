@@ -246,7 +246,7 @@ const openNewAddress = () => {
   showNewAddressDialog.value = true
 }
 
-// Undergo order placement and immediate payment verification
+// Create order, then continue in the order detail/cashier view.
 const handlePay = async () => {
   if (!selectedAddress.value) {
     alert('请添加并选择收货地址')
@@ -280,26 +280,10 @@ const handlePay = async () => {
 
     const orderId = orderData.orderId
 
-    // 2. Call real Pay API
-    const payRes = await signedFetch('/api/pay', {
-      method: 'POST',
-      body: JSON.stringify({ orderId })
-    })
-
-    if (payRes.ok) {
-      orderCompleted.value = true
-      // Local cart cleanup: remove checked items
-      cartStore.items = cartStore.items.filter(item => !cartStore.selectedSkuIDs.includes(item.skuId))
-      cartStore.selectedSkuIDs = []
-      cartStore.saveCart()
-
-      setTimeout(() => {
-        router.push('/')
-      }, 3000)
-    } else {
-      alert('订单创建成功但支付请求异常，请前往订单中心继续支付')
-      router.push('/orders')
-    }
+    cartStore.items = cartStore.items.filter(item => !cartStore.selectedSkuIDs.includes(item.skuId))
+    cartStore.selectedSkuIDs = []
+    cartStore.saveCart()
+    router.push(`/orders/${orderId}`)
   } catch (err) {
     alert('网络交互失败，请确认后端运行状态')
   } finally {
@@ -431,7 +415,7 @@ watch(
           </div>
 
           <Button @click="handlePay" :loading="loading || previewLoading" variant="primary" class="pay-btn" :disabled="!pricePreview">
-            立即支付 (¥{{ (payableAmount / 100).toFixed(2) }})
+            提交订单 (¥{{ (payableAmount / 100).toFixed(2) }})
           </Button>
         </Card>
       </div>

@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import Card from '../components/ui/Card.vue'
 import Button from '../components/ui/Button.vue'
 import Badge from '../components/ui/Badge.vue'
 import { signedFetch } from '../api/request'
+
+const router = useRouter()
 
 interface OrderItem {
   id: number
@@ -19,6 +22,7 @@ interface OrderItem {
 interface OrderInfo {
   id: string
   createdAt: string
+  payExpireAt?: string
   totalAmount: number
   status: number
   refundReason?: string
@@ -106,12 +110,10 @@ const fetchAllOrders = async () => {
   }
 }
 
-// Calculate remaining pay time (15 seconds limit from creation for seckill, 60s for normal)
 const getRemainingSeconds = (order: OrderInfo) => {
-  const createdTime = new Date(order.createdAt).getTime()
-  // If order id starts with GS, it is a normal order (60s limit), otherwise seckill (15s limit)
-  const isNormal = order.id.startsWith('GS-')
-  const limitTime = createdTime + (isNormal ? 60 : 15) * 1000
+  const limitTime = order.payExpireAt
+    ? new Date(order.payExpireAt).getTime()
+    : new Date(order.createdAt).getTime()
   const diff = Math.max(0, Math.ceil((limitTime - nowTime.value) / 1000))
   return diff
 }
@@ -329,6 +331,14 @@ onUnmounted(() => {
               </div>
 
               <div class="action-group">
+                <Button
+                  @click="router.push(`/orders/${order.id}`)"
+                  variant="secondary"
+                  class="detail-btn-action"
+                >
+                  详情
+                </Button>
+
                 <!-- Pay button -->
                 <Button
                   @click="handlePay(order.id)"

@@ -52,6 +52,7 @@ func RegisterRoutes(r *gin.Engine) {
 			protected.POST("/checkout/preview", PreviewCheckout)
 			protected.POST("/orders", CreateOrder)
 			protected.GET("/orders", GetOrders)
+			protected.GET("/orders/:id", GetOrderDetail)
 			protected.POST("/orders/:id/refund", ApplyRefund)
 
 			// 高并发秒杀及支付确认
