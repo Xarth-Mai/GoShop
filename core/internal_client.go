@@ -766,6 +766,20 @@ func fallbackLocal(db *gorm.DB, targetPort int, method, path string, reqBody int
 		})
 	}
 
+	if targetPort == 8103 && method == "GET" && strings.HasPrefix(path, "/api/internal/inventory/reservations/") {
+		parts := strings.Split(path, "/")
+		orderID := parts[len(parts)-1]
+		var reservations []models.InventoryReservation
+		if err := db.Where("order_id = ?", orderID).Order("created_at asc").Find(&reservations).Error; err != nil {
+			return err
+		}
+		raw, err := json.Marshal(reservations)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(raw, respDest)
+	}
+
 	if targetPort == 8108 && method == "POST" && path == "/api/internal/cart/clear-items" {
 		var req struct {
 			UserID uint   `json:"userId"`
@@ -782,6 +796,40 @@ func fallbackLocal(db *gorm.DB, targetPort int, method, path string, reqBody int
 			return nil
 		}
 		return db.Where("user_id = ? AND sku_id IN ?", req.UserID, req.SkuIDs).Delete(&models.CartItem{}).Error
+	}
+
+	if targetPort == 8106 && method == "GET" && strings.HasPrefix(path, "/api/internal/payments/by-order/") {
+		parts := strings.Split(path, "/")
+		orderID := parts[len(parts)-1]
+		var payment models.PaymentOrder
+		if err := db.Where("order_id = ?", orderID).Order("created_at desc").First(&payment).Error; err != nil {
+			return err
+		}
+		raw, err := json.Marshal(payment)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(raw, respDest)
+	}
+
+	if targetPort == 8107 && method == "GET" && strings.HasPrefix(path, "/api/internal/aftersales/by-order/") {
+		parts := strings.Split(path, "/")
+		orderID := parts[len(parts)-1]
+		var result struct {
+			AfterSales   []models.AfterSaleOrder `json:"afterSales"`
+			RefundOrders []models.RefundOrder    `json:"refundOrders"`
+		}
+		if err := db.Preload("Items").Where("order_id = ?", orderID).Order("created_at desc").Find(&result.AfterSales).Error; err != nil {
+			return err
+		}
+		if err := db.Where("order_id = ?", orderID).Order("created_at desc").Find(&result.RefundOrders).Error; err != nil {
+			return err
+		}
+		raw, err := json.Marshal(result)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(raw, respDest)
 	}
 
 	return fmt.Errorf("no connection to service at port %d, and fallback local not implemented for path %s", targetPort, path)

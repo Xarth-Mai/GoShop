@@ -78,6 +78,8 @@ func RegisterPaymentServiceRoutes(r *gin.Engine) {
 	protected.POST("/payments", CreatePayment)
 	protected.GET("/payments/:id", GetPayment)
 	protected.POST("/pay", PayOrder)
+
+	RegisterInternalRoutes(r)
 }
 
 func RegisterAfterSaleServiceRoutes(r *gin.Engine) {
@@ -87,6 +89,8 @@ func RegisterAfterSaleServiceRoutes(r *gin.Engine) {
 	admin := protected.Group("/admin")
 	admin.Use(core.AdminRequiredMiddleware())
 	admin.POST("/orders/:id/refund/audit", AuditRefund)
+
+	RegisterInternalRoutes(r)
 }
 
 func RegisterInventoryServiceRoutes(r *gin.Engine) {

@@ -40,11 +40,16 @@ func RegisterInternalRoutes(r *gin.Engine) {
 		internal.POST("/inventory/reserve", internalReserveStock)
 		internal.POST("/inventory/release", internalReleaseStock)
 		internal.POST("/inventory/restock", internalRestockStock)
+		internal.GET("/inventory/reservations/:orderId", internalGetInventoryReservations)
 
 		// 3. 优惠券/营销服务接口
 		internal.POST("/promotion/lock", internalLockCoupon)
 		internal.POST("/promotion/release", internalReleaseCoupon)
 		internal.POST("/promotion/candidates", internalGetCouponCandidates)
+
+		// 4. 支付与售后服务接口
+		internal.GET("/payments/by-order/:orderId", internalGetPaymentByOrder)
+		internal.GET("/aftersales/by-order/:orderId", internalGetAfterSalesByOrder)
 	}
 }
 
@@ -570,6 +575,49 @@ func internalRestockStock(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "success"})
+}
+
+func internalGetInventoryReservations(c *gin.Context) {
+	orderID := c.Param("orderId")
+	var reservations []models.InventoryReservation
+	if err := core.ReplicaDB.Where("order_id = ?", orderID).Order("created_at asc").Find(&reservations).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, reservations)
+}
+
+func internalGetPaymentByOrder(c *gin.Context) {
+	orderID := c.Param("orderId")
+	var payment models.PaymentOrder
+	if err := core.ReplicaDB.Where("order_id = ?", orderID).Order("created_at desc").First(&payment).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "payment not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, payment)
+}
+
+type InternalAfterSalesByOrder struct {
+	AfterSales   []models.AfterSaleOrder `json:"afterSales"`
+	RefundOrders []models.RefundOrder    `json:"refundOrders"`
+}
+
+func internalGetAfterSalesByOrder(c *gin.Context) {
+	orderID := c.Param("orderId")
+	var result InternalAfterSalesByOrder
+	if err := core.ReplicaDB.Preload("Items").Where("order_id = ?", orderID).Order("created_at desc").Find(&result.AfterSales).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := core.ReplicaDB.Where("order_id = ?", orderID).Order("created_at desc").Find(&result.RefundOrders).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 // ----------------------------------------------------

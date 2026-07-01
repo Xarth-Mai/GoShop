@@ -227,32 +227,62 @@ func (s Service) CancelPendingOrder(orderID, reason string) error {
 
 func (s Service) GetOrderDetail(userID uint, orderID string) (Detail, error) {
 	var detail Detail
-	if err := s.DB.Preload("Items.Sku").First(&detail.Order, "id = ? AND user_id = ?", orderID, userID).Error; err != nil {
+	if err := s.DB.Preload("Items").First(&detail.Order, "id = ? AND user_id = ?", orderID, userID).Error; err != nil {
 		return detail, err
 	}
+	EnrichOrderItemSKUs(s.DB, detail.Order.Items)
 
 	if err := s.DB.Where("order_id = ?", orderID).Order("created_at asc").Find(&detail.StateLogs).Error; err != nil {
 		return detail, err
 	}
 
 	var paymentOrder models.PaymentOrder
-	if err := s.DB.Where("order_id = ?", orderID).Order("created_at desc").First(&paymentOrder).Error; err == nil {
+	if err := core.CallInternalService(s.DB, 8106, "GET", fmt.Sprintf("/api/internal/payments/by-order/%s", orderID), nil, &paymentOrder); err == nil {
 		detail.PaymentOrder = &paymentOrder
-	} else if err != gorm.ErrRecordNotFound {
-		return detail, err
 	}
 
-	if err := s.DB.Preload("Items").Where("order_id = ?", orderID).Order("created_at desc").Find(&detail.AfterSales).Error; err != nil {
-		return detail, err
+	var afterSaleResult struct {
+		AfterSales   []models.AfterSaleOrder `json:"afterSales"`
+		RefundOrders []models.RefundOrder    `json:"refundOrders"`
 	}
-	if err := s.DB.Where("order_id = ?", orderID).Order("created_at desc").Find(&detail.RefundOrders).Error; err != nil {
-		return detail, err
+	if err := core.CallInternalService(s.DB, 8107, "GET", fmt.Sprintf("/api/internal/aftersales/by-order/%s", orderID), nil, &afterSaleResult); err == nil {
+		detail.AfterSales = afterSaleResult.AfterSales
+		detail.RefundOrders = afterSaleResult.RefundOrders
 	}
-	if err := s.DB.Where("order_id = ?", orderID).Order("created_at asc").Find(&detail.Reservations).Error; err != nil {
-		return detail, err
+
+	var reservations []models.InventoryReservation
+	if err := core.CallInternalService(s.DB, 8103, "GET", fmt.Sprintf("/api/internal/inventory/reservations/%s", orderID), nil, &reservations); err == nil {
+		detail.Reservations = reservations
 	}
 
 	return detail, nil
+}
+
+func EnrichOrdersItemSKUs(db *gorm.DB, orders []models.Order) {
+	cache := make(map[uint]models.Sku)
+	for i := range orders {
+		enrichItemsWithCache(db, orders[i].Items, cache)
+	}
+}
+
+func EnrichOrderItemSKUs(db *gorm.DB, items []models.OrderItem) {
+	enrichItemsWithCache(db, items, make(map[uint]models.Sku))
+}
+
+func enrichItemsWithCache(db *gorm.DB, items []models.OrderItem, cache map[uint]models.Sku) {
+	for i := range items {
+		skuID := items[i].SkuID
+		if sku, ok := cache[skuID]; ok {
+			items[i].Sku = sku
+			continue
+		}
+		var sku models.Sku
+		if err := core.CallInternalService(db, 8102, "GET", fmt.Sprintf("/api/internal/products/%d", skuID), nil, &sku); err != nil {
+			continue
+		}
+		cache[skuID] = sku
+		items[i].Sku = sku
+	}
 }
 
 func appendStateLog(tx *gorm.DB, orderID string, fromStatus, toStatus int, operatorID uint, event, remark string) error {

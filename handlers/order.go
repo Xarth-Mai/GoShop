@@ -416,7 +416,7 @@ func GetOrders(c *gin.Context) {
 
 	statusStr := c.Query("status")
 
-	query := core.ReplicaDB.Preload("Items.Sku").Preload("Items").Where("user_id = ?", userID)
+	query := core.ReplicaDB.Preload("Items").Where("user_id = ?", userID)
 	if statusStr != "" {
 		status, err := strconv.Atoi(statusStr)
 		if err == nil {
@@ -429,6 +429,7 @@ func GetOrders(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "查询订单列表失败: " + err.Error()})
 		return
 	}
+	ordersvc.EnrichOrdersItemSKUs(core.ReplicaDB, orders)
 
 	c.JSON(http.StatusOK, orders)
 }
