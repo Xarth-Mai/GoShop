@@ -63,6 +63,8 @@ func RegisterOrderServiceRoutes(r *gin.Engine) {
 	protected.GET("/orders", GetOrders)
 	protected.GET("/orders/:id", GetOrderDetail)
 	protected.POST("/seckill", Seckill)
+
+	RegisterInternalRoutes(r)
 }
 
 func RegisterPaymentServiceRoutes(r *gin.Engine) {

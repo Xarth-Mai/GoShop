@@ -23,6 +23,9 @@ func RegisterInternalRoutes(r *gin.Engine) {
 		internal.GET("/products/:id", internalGetProductSku)
 		internal.GET("/products/:id/cart-summary", internalGetProductCartSummary)
 
+		// 1.5 订单服务接口
+		internal.GET("/orders/:id/payment-source", internalGetOrderPaymentSource)
+
 		// 2. 库存服务接口
 		internal.POST("/inventory/reserve", internalReserveStock)
 		internal.POST("/inventory/release", internalReleaseStock)
@@ -61,6 +64,50 @@ type InternalProductCartSummary struct {
 	SkuName string `json:"skuName"`
 	Price   int    `json:"price"`
 	Image   string `json:"image"`
+}
+
+type InternalOrderPaymentSource struct {
+	OrderID      string     `json:"orderId"`
+	UserID       uint       `json:"userId"`
+	TotalAmount  int        `json:"totalAmount"`
+	Status       int        `json:"status"`
+	PayStatus    int        `json:"payStatus"`
+	UserCouponID uint       `json:"userCouponId"`
+	PayExpireAt  *time.Time `json:"payExpireAt,omitempty"`
+}
+
+func internalGetOrderPaymentSource(c *gin.Context) {
+	orderID := c.Param("id")
+	userIDValue := uint(0)
+	if userIDRaw := c.Query("userId"); userIDRaw != "" {
+		userID, err := strconv.Atoi(userIDRaw)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
+			return
+		}
+		userIDValue = uint(userID)
+	}
+
+	query := core.ReplicaDB.Where("id = ?", orderID)
+	if userIDValue > 0 {
+		query = query.Where("user_id = ?", userIDValue)
+	}
+
+	var order models.Order
+	if err := query.First(&order).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, InternalOrderPaymentSource{
+		OrderID:      order.ID,
+		UserID:       order.UserID,
+		TotalAmount:  order.TotalAmount,
+		Status:       order.Status,
+		PayStatus:    order.PayStatus,
+		UserCouponID: order.UserCouponID,
+		PayExpireAt:  order.PayExpireAt,
+	})
 }
 
 func internalGetProductCartSummary(c *gin.Context) {

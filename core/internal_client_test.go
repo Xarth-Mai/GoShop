@@ -43,6 +43,34 @@ func TestCallInternalService_Fallback(t *testing.T) {
 		}
 	})
 
+	t.Run("Order Payment Source Fallback", func(t *testing.T) {
+		order := models.Order{
+			ID:          "ORDER-INTERNAL-SOURCE-01",
+			UserID:      1,
+			TotalAmount: 12345,
+			Status:      models.OrderStatusPendingPayment,
+			PayStatus:   models.PayStatusUnpaid,
+		}
+		if err := db.Create(&order).Error; err != nil {
+			t.Fatalf("create order: %v", err)
+		}
+
+		var source struct {
+			OrderID     string `json:"orderId"`
+			UserID      uint   `json:"userId"`
+			TotalAmount int    `json:"totalAmount"`
+			Status      int    `json:"status"`
+			PayStatus   int    `json:"payStatus"`
+		}
+		err := core.CallInternalService(db, 8105, "GET", "/api/internal/orders/ORDER-INTERNAL-SOURCE-01/payment-source?userId=1", nil, &source)
+		if err != nil {
+			t.Fatalf("order payment source fallback failed: %v", err)
+		}
+		if source.OrderID != order.ID || source.UserID != order.UserID || source.TotalAmount != order.TotalAmount {
+			t.Fatalf("unexpected order payment source: %+v", source)
+		}
+	})
+
 	// 2. 优惠券 Candidates 降级验证 (POST /api/internal/promotion/candidates)
 	t.Run("Promotion Candidates Fallback", func(t *testing.T) {
 		// 往测试库插入一张可用优惠券关联

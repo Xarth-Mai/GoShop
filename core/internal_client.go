@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -127,6 +128,50 @@ func fallbackLocal(db *gorm.DB, targetPort int, method, path string, reqBody int
 			Image:   spu.MainImage,
 		}
 		raw, err := json.Marshal(summary)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(raw, respDest)
+	}
+
+	if targetPort == 8105 && method == "GET" && strings.HasPrefix(path, "/api/internal/orders/") && strings.Contains(path, "/payment-source") {
+		parsed, err := url.Parse("http://internal" + path)
+		if err != nil {
+			return err
+		}
+		parts := strings.Split(parsed.Path, "/")
+		if len(parts) < 2 {
+			return fmt.Errorf("invalid order payment source path")
+		}
+		orderID := parts[len(parts)-2]
+		userID, _ := strconv.Atoi(parsed.Query().Get("userId"))
+
+		query := db.Where("id = ?", orderID)
+		if userID > 0 {
+			query = query.Where("user_id = ?", uint(userID))
+		}
+		var order models.Order
+		if err := query.First(&order).Error; err != nil {
+			return err
+		}
+		source := struct {
+			OrderID      string     `json:"orderId"`
+			UserID       uint       `json:"userId"`
+			TotalAmount  int        `json:"totalAmount"`
+			Status       int        `json:"status"`
+			PayStatus    int        `json:"payStatus"`
+			UserCouponID uint       `json:"userCouponId"`
+			PayExpireAt  *time.Time `json:"payExpireAt,omitempty"`
+		}{
+			OrderID:      order.ID,
+			UserID:       order.UserID,
+			TotalAmount:  order.TotalAmount,
+			Status:       order.Status,
+			PayStatus:    order.PayStatus,
+			UserCouponID: order.UserCouponID,
+			PayExpireAt:  order.PayExpireAt,
+		}
+		raw, err := json.Marshal(source)
 		if err != nil {
 			return err
 		}

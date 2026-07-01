@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"GoShop/internal/inventory"
+	"GoShop/core"
 	"GoShop/internal/outbox"
-	"GoShop/internal/promotion"
 	"GoShop/models"
 
 	"gorm.io/gorm"
@@ -37,13 +36,22 @@ type CreatePaymentResult struct {
 	PayExpireAt    *time.Time `json:"payExpireAt,omitempty"`
 }
 
+type orderPaymentSource struct {
+	OrderID      string     `json:"orderId"`
+	UserID       uint       `json:"userId"`
+	TotalAmount  int        `json:"totalAmount"`
+	Status       int        `json:"status"`
+	PayStatus    int        `json:"payStatus"`
+	UserCouponID uint       `json:"userCouponId"`
+	PayExpireAt  *time.Time `json:"payExpireAt,omitempty"`
+}
+
 type Service struct {
-	DB        *gorm.DB
-	Inventory inventory.Service
+	DB *gorm.DB
 }
 
 func NewService(db *gorm.DB) Service {
-	return Service{DB: db, Inventory: inventory.NewService(db)}
+	return Service{DB: db}
 }
 
 func PaymentOrderID(orderID string) string {
@@ -53,15 +61,15 @@ func PaymentOrderID(orderID string) string {
 func (s Service) CreateOrGetPaymentOrder(userID uint, orderID string) (CreatePaymentResult, error) {
 	var result CreatePaymentResult
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
-		var order models.Order
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&order, "id = ? AND user_id = ?", orderID, userID).Error; err != nil {
+		source, err := loadOrderPaymentSource(tx, userID, orderID)
+		if err != nil {
 			return err
 		}
-		if order.Status != models.OrderStatusPendingPayment && order.Status != models.OrderStatusPaid {
+		if source.Status != models.OrderStatusPendingPayment && source.Status != models.OrderStatusPaid {
 			return fmt.Errorf("当前订单状态不可创建支付单")
 		}
 
-		payment, err := CreateMockPaymentOrder(tx, order)
+		payment, err := CreateMockPaymentOrderFromSource(tx, source)
 		if err != nil {
 			return err
 		}
@@ -70,7 +78,7 @@ func (s Service) CreateOrGetPaymentOrder(userID uint, orderID string) (CreatePay
 			OrderID:        payment.OrderID,
 			Amount:         payment.Amount,
 			Status:         payment.Status,
-			PayExpireAt:    order.PayExpireAt,
+			PayExpireAt:    source.PayExpireAt,
 		}
 		return nil
 	})
@@ -79,9 +87,7 @@ func (s Service) CreateOrGetPaymentOrder(userID uint, orderID string) (CreatePay
 
 func (s Service) GetPaymentOrder(userID uint, paymentOrderID string) (models.PaymentOrder, error) {
 	var payment models.PaymentOrder
-	err := s.DB.Joins("JOIN orders ON orders.id = payment_orders.order_id").
-		Where("payment_orders.id = ? AND orders.user_id = ?", paymentOrderID, userID).
-		First(&payment).Error
+	err := s.DB.Where("id = ? AND user_id = ?", paymentOrderID, userID).First(&payment).Error
 	return payment, err
 }
 
@@ -93,11 +99,7 @@ func (s Service) PayMockOrder(userID uint, orderID string) (PayResult, error) {
 	}
 	result.PaymentOrderID = paymentResult.PaymentOrderID
 
-	var order models.Order
-	if err := s.DB.First(&order, "id = ? AND user_id = ?", orderID, userID).Error; err != nil {
-		return result, err
-	}
-	if order.Status == models.OrderStatusPaid && order.PayStatus == models.PayStatusPaid {
+	if paymentResult.Status == models.PaymentStatusPaid {
 		result.AlreadyPaid = true
 		return result, nil
 	}
@@ -180,15 +182,15 @@ func (s Service) HandleMockCallback(req MockCallbackRequest) (string, error) {
 			return nil
 		}
 
-		var order models.Order
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&order, "id = ? AND user_id = ?", payment.OrderID, payment.UserID).Error; err != nil {
+		source, err := loadOrderPaymentSource(tx, payment.UserID, payment.OrderID)
+		if err != nil {
 			return err
 		}
-		if order.Status != models.OrderStatusPendingPayment || order.PayStatus != models.PayStatusUnpaid {
+		if source.Status != models.OrderStatusPendingPayment || source.PayStatus != models.PayStatusUnpaid {
 			return nil
 		}
 
-		return s.markPaid(tx, order, payment, req.ChannelTradeNo, "PAYMENT_CALLBACK_PAID", "模拟支付回调入账")
+		return s.markPaid(tx, source, payment, req.ChannelTradeNo, "PAYMENT_CALLBACK_PAID", "模拟支付回调入账")
 	})
 	if err != nil {
 		return orderID, err
@@ -200,15 +202,27 @@ func (s Service) HandleMockCallback(req MockCallbackRequest) (string, error) {
 }
 
 func CreateMockPaymentOrder(tx *gorm.DB, order models.Order) (models.PaymentOrder, error) {
+	return CreateMockPaymentOrderFromSource(tx, orderPaymentSource{
+		OrderID:      order.ID,
+		UserID:       order.UserID,
+		TotalAmount:  order.TotalAmount,
+		Status:       order.Status,
+		PayStatus:    order.PayStatus,
+		UserCouponID: order.UserCouponID,
+		PayExpireAt:  order.PayExpireAt,
+	})
+}
+
+func CreateMockPaymentOrderFromSource(tx *gorm.DB, source orderPaymentSource) (models.PaymentOrder, error) {
 	payment := models.PaymentOrder{
-		ID:             PaymentOrderID(order.ID),
-		OrderID:        order.ID,
-		UserID:         order.UserID,
+		ID:             PaymentOrderID(source.OrderID),
+		OrderID:        source.OrderID,
+		UserID:         source.UserID,
 		Channel:        models.PaymentChannelMock,
-		Amount:         order.TotalAmount,
+		Amount:         source.TotalAmount,
 		Currency:       "CNY",
 		Status:         models.PaymentStatusCreated,
-		IdempotencyKey: "mock:create:" + order.ID,
+		IdempotencyKey: "mock:create:" + source.OrderID,
 	}
 
 	var existing models.PaymentOrder
@@ -222,7 +236,7 @@ func CreateMockPaymentOrder(tx *gorm.DB, order models.Order) (models.PaymentOrde
 	return payment, tx.Create(&payment).Error
 }
 
-func (s Service) markPaid(tx *gorm.DB, order models.Order, payment models.PaymentOrder, channelTradeNo, event, remark string) error {
+func (s Service) markPaid(tx *gorm.DB, source orderPaymentSource, payment models.PaymentOrder, channelTradeNo, event, remark string) error {
 	now := time.Now()
 	payment.Status = models.PaymentStatusPaid
 	payment.ChannelTradeNo = channelTradeNo
@@ -232,58 +246,170 @@ func (s Service) markPaid(tx *gorm.DB, order models.Order, payment models.Paymen
 		return err
 	}
 
+	if err := markPaidInSharedMonolithDB(tx, source, payment, event, remark); err != nil {
+		return err
+	}
+	return outbox.NewService().Publish(tx, "payment", payment.ID, "PaymentSucceeded", map[string]interface{}{
+		"paymentOrderId": payment.ID,
+		"orderId":        source.OrderID,
+		"userId":         source.UserID,
+		"userCouponId":   source.UserCouponID,
+		"amount":         payment.Amount,
+		"channel":        payment.Channel,
+		"channelTradeNo": payment.ChannelTradeNo,
+	})
+}
+
+func loadOrderPaymentSource(tx *gorm.DB, userID uint, orderID string) (orderPaymentSource, error) {
+	var source orderPaymentSource
+	err := core.CallInternalService(
+		tx,
+		8105,
+		"GET",
+		fmt.Sprintf("/api/internal/orders/%s/payment-source?userId=%d", orderID, userID),
+		nil,
+		&source,
+	)
+	return source, err
+}
+
+func markPaidInSharedMonolithDB(tx *gorm.DB, source orderPaymentSource, payment models.PaymentOrder, event, remark string) error {
+	if !tx.Migrator().HasTable(&models.Order{}) {
+		return nil
+	}
+
+	var order models.Order
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&order, "id = ? AND user_id = ?", source.OrderID, source.UserID).Error; err != nil {
+		return err
+	}
+	if order.Status != models.OrderStatusPendingPayment || order.PayStatus != models.PayStatusUnpaid {
+		return nil
+	}
+
 	fromStatus := order.Status
 	order.Status = models.OrderStatusPaid
 	order.PayStatus = models.PayStatusPaid
 	if err := tx.Save(&order).Error; err != nil {
 		return err
 	}
-	if err := s.Inventory.ConfirmOrderReservations(tx, order.ID); err != nil {
-		return err
+
+	if tx.Migrator().HasTable(&models.InventoryReservation{}) {
+		if err := confirmSharedOrderReservations(tx, order.ID); err != nil {
+			return err
+		}
 	}
-	if err := promotion.NewService(tx).ConfirmCouponUsed(tx, order.UserID, order.UserCouponID, order.ID); err != nil {
-		return err
+	if tx.Migrator().HasTable(&models.UserCoupon{}) {
+		if err := confirmSharedCoupon(tx, order.UserID, order.UserCouponID, order.ID); err != nil {
+			return err
+		}
+	}
+	if tx.Migrator().HasTable(&models.AccountingEntry{}) {
+		entries := []models.AccountingEntry{
+			{
+				BizType:     "payment",
+				BizID:       payment.ID,
+				AccountType: "cash",
+				Direction:   models.AccountingDirectionDebit,
+				Amount:      payment.Amount,
+				Currency:    payment.Currency,
+			},
+			{
+				BizType:     "payment",
+				BizID:       payment.ID,
+				AccountType: "sales_revenue",
+				Direction:   models.AccountingDirectionCredit,
+				Amount:      payment.Amount,
+				Currency:    payment.Currency,
+			},
+		}
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&entries).Error; err != nil {
+			return err
+		}
 	}
 
-	entries := []models.AccountingEntry{
-		{
-			BizType:     "payment",
-			BizID:       payment.ID,
-			AccountType: "cash",
-			Direction:   models.AccountingDirectionDebit,
-			Amount:      payment.Amount,
-			Currency:    payment.Currency,
-		},
-		{
-			BizType:     "payment",
-			BizID:       payment.ID,
-			AccountType: "sales_revenue",
-			Direction:   models.AccountingDirectionCredit,
-			Amount:      payment.Amount,
-			Currency:    payment.Currency,
-		},
+	if tx.Migrator().HasTable(&models.OrderStateLog{}) {
+		if err := tx.Create(&models.OrderStateLog{
+			OrderID:      order.ID,
+			FromStatus:   fromStatus,
+			ToStatus:     models.OrderStatusPaid,
+			OperatorType: 1,
+			OperatorID:   order.UserID,
+			Event:        event,
+			Remark:       remark,
+		}).Error; err != nil {
+			return err
+		}
 	}
-	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&entries).Error; err != nil {
+	return nil
+}
+
+func confirmSharedOrderReservations(tx *gorm.DB, orderID string) error {
+	var reservations []models.InventoryReservation
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("order_id = ? AND status = ?", orderID, models.ReservationStatusReserved).
+		Find(&reservations).Error; err != nil {
 		return err
+	}
+	for _, reservation := range reservations {
+		var inv models.SkuInventory
+		if err := tx.Where("sku_id = ?", reservation.SkuID).First(&inv).Error; err != nil {
+			return err
+		}
+		if inv.Reserved < reservation.Quantity {
+			return fmt.Errorf("SKU %d 预占库存不足，无法确认", reservation.SkuID)
+		}
+		inv.Reserved -= reservation.Quantity
+		inv.Sold += reservation.Quantity
+		inv.Version++
+		if err := tx.Save(&inv).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&reservation).Updates(map[string]interface{}{
+			"status":     models.ReservationStatusConfirmed,
+			"updated_at": time.Now(),
+		}).Error; err != nil {
+			return err
+		}
+		journal := models.InventoryJournal{
+			SkuID:         reservation.SkuID,
+			OrderID:       orderID,
+			ReservationID: reservation.ID,
+			ChangeType:    "CONFIRM",
+			Quantity:      reservation.Quantity,
+		}
+		if tx.Migrator().HasTable(&models.InventoryJournal{}) {
+			if err := tx.Create(&journal).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func confirmSharedCoupon(tx *gorm.DB, userID, userCouponID uint, orderID string) error {
+	if userCouponID == 0 {
+		return nil
+	}
+	var userCoupon models.UserCoupon
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		First(&userCoupon, "id = ? AND user_id = ?", userCouponID, userID).Error; err != nil {
+		return err
+	}
+	if userCoupon.Status == models.UserCouponStatusUsed {
+		return nil
+	}
+	if userCoupon.Status != models.UserCouponStatusLocked || userCoupon.LockedOrderID != orderID {
+		return fmt.Errorf("优惠券未被当前订单锁定")
 	}
 
-	if err := tx.Create(&models.OrderStateLog{
-		OrderID:      order.ID,
-		FromStatus:   fromStatus,
-		ToStatus:     models.OrderStatusPaid,
-		OperatorType: 1,
-		OperatorID:   order.UserID,
-		Event:        event,
-		Remark:       remark,
-	}).Error; err != nil {
-		return err
-	}
-	return outbox.NewService().Publish(tx, "payment", payment.ID, "PaymentSucceeded", map[string]interface{}{
-		"paymentOrderId": payment.ID,
-		"orderId":        order.ID,
-		"userId":         order.UserID,
-		"amount":         payment.Amount,
-		"channel":        payment.Channel,
-		"channelTradeNo": payment.ChannelTradeNo,
-	})
+	now := time.Now()
+	return tx.Model(&models.UserCoupon{}).
+		Where("id = ? AND user_id = ?", userCouponID, userID).
+		Updates(map[string]interface{}{
+			"status":          models.UserCouponStatusUsed,
+			"used_at":         &now,
+			"locked_order_id": "",
+			"locked_at":       nil,
+			"updated_at":      now,
+		}).Error
 }

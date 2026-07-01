@@ -23,6 +23,7 @@ type NATSOutboxEvent struct {
 type PaymentSucceededPayload struct {
 	OrderID        string `json:"orderId"`
 	UserID         uint   `json:"userId"`
+	UserCouponID   uint   `json:"userCouponId"`
 	PaymentOrderID string `json:"paymentOrderId"`
 	Amount         int    `json:"amount"`
 	Channel        string `json:"channel"`
@@ -172,18 +173,12 @@ func RegisterPromotionServiceSubscribers() {
 
 		return core.DB.Transaction(func(tx *gorm.DB) error {
 			return core.ProcessWithInbox(tx, outer.EventID, consumerName, func(dbTx *gorm.DB) error {
-				// 获取订单绑定的优惠券 ID (在硬拆分前直接查询 orders 库，后续通过 gRPC 实现独立)
-				var order models.Order
-				if err := dbTx.Select("user_coupon_id").Where("id = ?", payload.OrderID).First(&order).Error; err != nil {
-					return err
-				}
-
-				if order.UserCouponID == 0 {
+				if payload.UserCouponID == 0 {
 					return nil // 没有使用优惠券，幂等退出
 				}
 
 				// 将优惠券状态置为已核销
-				return promotion.NewService(dbTx).ConfirmCouponUsed(dbTx, payload.UserID, order.UserCouponID, payload.OrderID)
+				return promotion.NewService(dbTx).ConfirmCouponUsed(dbTx, payload.UserID, payload.UserCouponID, payload.OrderID)
 			})
 		})
 	})
