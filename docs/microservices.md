@@ -5,7 +5,7 @@ This repository now supports two deployment shapes:
 1. `go run .`: the existing Gin monolith with embedded frontend hosting.
 2. `go run ./cmd/goshop-*-service`: single-repository, multi-process services routed by Caddy.
 
-The split is intentionally a transitional service split. Services still share the same Go module, PostgreSQL schema, Redis instance, models, and handler package. That keeps current product behavior stable while moving runtime ownership to separate processes. The next split step is replacing shared database access with service APIs and local snapshots.
+The split has evolved from a transitional shared-DB split to a **fully decoupled physical microservice split**. Each service now connects to its own independent database schema and runs local database migrations on startup. Cross-service communication is achieved synchronously via point-to-point HTTP-RPC (with local unit-testing SQLite memory DB fallbacks to prevent import cycles and make local verification plug-and-play) and asynchronously via a NATS JetStream message bus with idempotent Inbox consumer reconciliation.
 
 ## Services
 
@@ -75,41 +75,100 @@ Use `deploy/Caddyfile.microservices` to route the current frontend API paths to 
 
 For Cloudflare Tunnel deployment, see `docs/deployment.md` and `deploy/cloudflared/config.yml`.
 
-## Event Bus
+## Event Bus (NATS JetStream)
 
-Transactional business events are written to `outbox_events` in the same database transaction as the state change. The scheduler service polls pending events and publishes them to Redis Stream `goshop:events`, then marks the event as sent.
+GoShop uses **NATS JetStream** as its enterprise-level event message bus.
+Transactional business events are written to `outbox_events` in the same database transaction as the state change. The scheduler service polls pending events and publishes them to NATS JetStream under the subject pattern: `goshop.events.<aggregate>.<event>`.
 
-Current emitted events:
+Upon successful publication and NATS ACK, the scheduler marks the outbox event as sent. Idempotent consumers subscribe to these subjects via Queue Groups (e.g. `goshop-order-service-group`) and process incoming events wrapped in transactional Inbox tables (`inbox_events`) to prevent double-spending and ensure eventual consistency.
 
-- `OrderCreated`
-- `OrderCanceled`
-- `PaymentSucceeded`
-- `AfterSaleApplied`
-- `AfterSaleRejected`
-- `RefundSucceeded`
+Current NATS JetStream events:
 
-This gives the service split a reliable handoff point without adding NATS/RabbitMQ yet. When a dedicated MQ is introduced, replace the Redis Stream publisher while keeping the transactional outbox table and event payloads stable.
+* `goshop.events.order.ordercreated`
+* `goshop.events.order.ordercanceled`
+* `goshop.events.payment.paymentsucceeded`
+* `goshop.events.aftersale.aftersaleapplied`
+* `goshop.events.aftersale.aftersalerejected`
+* `goshop.events.refund.refundsucceeded`
+
+---
+
+## Internal Synchronous HTTP-RPC Contracts
+
+To ensure absolute database isolation, services communicate synchronously via point-to-point HTTP-RPC under the `/api/internal/*` path.
+All internal requests require a secure verification header:
+* `X-Internal-Token`: `goshop_internal_communication_secret_token`
+
+### 1. Product Service (:8102)
+
+#### GET `/api/internal/products/:id`
+* **Description**: Fetch Sku detail information by Sku ID.
+* **Response**: Sku JSON object.
+
+### 2. Inventory Service (:8103)
+
+#### POST `/api/internal/inventory/reserve`
+* **Description**: Lock/reserve stock for an order.
+* **Payload**:
+  ```json
+  {
+    "orderId": "GS-1700000-01",
+    "userId": 1,
+    "items": [
+      { "skuId": 1, "qty": 2 }
+    ]
+  }
+  ```
+* **Response**: `{ "status": "success" }`
+
+#### POST `/api/internal/inventory/release`
+* **Description**: Release/unlock reserved stock for canceled orders.
+* **Payload**: `{ "orderId": "GS-1700000-01" }`
+* **Response**: `{ "status": "success" }`
+
+### 3. Promotion/Coupon Service (:8104)
+
+#### POST `/api/internal/promotion/candidates`
+* **Description**: Fetch all eligible coupons and calculate potential discounts for a shopping cart.
+* **Payload**:
+  ```json
+  {
+    "userId": 1,
+    "selectedUserCouponId": 0,
+    "subtotal": 45000
+  }
+  ```
+* **Response**: Array of eligible CouponCandidate objects.
+
+#### POST `/api/internal/promotion/lock`
+* **Description**: Lock a user coupon to prevent double-spending during order checkout.
+* **Payload**:
+  ```json
+  {
+    "userId": 1,
+    "userCouponId": 1,
+    "orderId": "GS-1700000-01",
+    "subtotal": 45000
+  }
+  ```
+* **Response**: `{ "discountAmount": 1000 }`
+
+#### POST `/api/internal/promotion/release`
+* **Description**: Release a locked user coupon for canceled orders.
+* **Payload**:
+  ```json
+  {
+    "userCouponId": 1,
+    "orderId": "GS-1700000-01"
+  }
+  ```
+* **Response**: `{ "status": "success" }`
+
+---
 
 ## Build
 
 ```bash
-mkdir -p bin
-go build -o bin/goshop-user-service ./cmd/goshop-user-service
-go build -o bin/goshop-product-service ./cmd/goshop-product-service
-go build -o bin/goshop-inventory-service ./cmd/goshop-inventory-service
-go build -o bin/goshop-promotion-service ./cmd/goshop-promotion-service
-go build -o bin/goshop-order-service ./cmd/goshop-order-service
-go build -o bin/goshop-payment-service ./cmd/goshop-payment-service
-go build -o bin/goshop-aftersale-service ./cmd/goshop-aftersale-service
-go build -o bin/goshop-cart-service ./cmd/goshop-cart-service
-go build -o bin/goshop-scheduler-service ./cmd/goshop-scheduler-service
+# Compile all 9 microservices to bin/
+./deploy/build.sh
 ```
-
-## Remaining Hard Split Work
-
-- Move service-owned tables to separate schemas or databases.
-- Replace direct cross-domain reads with gRPC/HTTP APIs.
-- Add Inbox-backed idempotent event consumers for `OrderCreated`, `PaymentSucceeded`, and `OrderCanceled`.
-- Replace the Redis Stream outbox publisher with NATS JetStream or RabbitMQ when operating beyond single-node/lightweight deployment.
-- Give each service its own DB user with least privilege.
-- Move shared handlers into service-specific packages as API contracts stabilize.

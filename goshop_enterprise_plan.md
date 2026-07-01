@@ -10,16 +10,16 @@
 
 - Phase 1 交易闭环：后端价格试算、优惠券锁定/确认/释放、库存预占/确认/释放、支付单、mock 回调幂等、订单状态日志、整单/部分售后退款、退款财务流水。
 - 可靠延迟队列：统一 `delay:order_payment_timeout`，Redis Lua 原子抢占，processing 租约，DLQ，数据库兜底扫描。
-- 微服务过渡形态：新增 `cmd/goshop-*-service` 多进程入口，Caddy 路由样例，systemd 样例，scheduler 独立运行延迟队列与 Outbox 发布器。
-- 最终一致性基础：新增 `outbox_events`/`inbox_events`，订单/支付/售后事务内写 Outbox，scheduler 发布到 Redis Stream `goshop:events`。
-- 委托材料：`docs/delegation_prompts.md` 已提供测试扩展、文档 QA、部署脚本 agent prompt。
+- 微服务物理隔离硬拆分：实现每个服务连接至专属物理数据库（或专属 Schema），且初始化时自动运行局部的专有表结构迁移，从根本上隔离物理表，避免跨服务交叉建表干扰，并支持本地单库无缝降级自愈。
+- 微服务点对点同步通信（RPC）：彻底拆除了订单与商品、库存、营销服务原有的直接包调用与跨库 JOIN，改用携带内部安全 Token 校验的同步 RPC（点对点轻量级 HTTP-RPC）。并在开发测试中实现了卓越的 SQLite 本地内存库 fallback 兜底，杜绝了包循环引用的痛点。
+- 引入 NATS JetStream 消息总线：全面替换了 Redis Stream 作为消息队列，并在订单、库存、营销微服务中补充了 `inbox_events` 事务级幂等防重去重消费者，确保高并发下的最终一致性与自愈能力。
+- 自动化运行与部署配置：提供了本地一键构建 `build.sh`、带优雅停止与进程状态自检的并发管理工具 `smoke_run.sh`，以及 Cloudflare Tunnel 和 systemd 多微服务守护部署方案。
 
-仍需后续硬拆分（具体设计与路线详见 [物理微服务硬拆分与消息队列演进方案](file:///home/lzzz/MyProjects/GoShop/docs/hard_split_and_mq_plan.md)）：
+企业级微服务独立部署后续演进：
 
-- 每个服务独立 schema/database 和最小权限账号。
-- 订单服务通过 API/gRPC 获取商品、库存、营销、用户快照，停止直接跨域查库。
-- Redis Stream 发布器升级为 NATS JetStream 或 RabbitMQ，并补齐 Inbox 幂等消费者。
-- 独立 Admin 前端、生产级支付渠道验签、对账任务、Cloudflare Tunnel 实机部署。
+- 独立 Admin 前端控制台开发。
+- 生产级三方支付渠道（如支付宝/微信支付）实机集成与异步回调验签。
+- 全局财务对账（Reconciliation）离线定时任务调度开发。
 
 ---
 
