@@ -20,7 +20,7 @@ func main() {
 }
 
 func startBackgroundWorkers() {
-	go outbox.NewPublisher(core.DB, core.RedisClient, core.Logger).Start(context.Background())
+	go outbox.NewPublisher(core.DB, core.Logger).Start(context.Background())
 	time.Sleep(100 * time.Millisecond)
 	handlers.StartReliableDelayQueueWorker()
 }

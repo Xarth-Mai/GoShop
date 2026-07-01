@@ -2,26 +2,27 @@ package outbox
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
 	"time"
 
+	"GoShop/core"
 	"GoShop/models"
 
-	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-const RedisStreamName = "goshop:events"
-
 type Publisher struct {
 	DB     *gorm.DB
-	Redis  *redis.Client
 	Logger *zap.Logger
 }
 
-func NewPublisher(db *gorm.DB, redisClient *redis.Client, logger *zap.Logger) Publisher {
-	return Publisher{DB: db, Redis: redisClient, Logger: logger}
+func NewPublisher(db *gorm.DB, logger *zap.Logger) Publisher {
+	return Publisher{DB: db, Logger: logger}
 }
 
 func (p Publisher) Start(ctx context.Context) {
@@ -41,7 +42,7 @@ func (p Publisher) Start(ctx context.Context) {
 }
 
 func (p Publisher) PublishPending(ctx context.Context, limit int) error {
-	if p.DB == nil || p.Redis == nil {
+	if p.DB == nil {
 		return nil
 	}
 	if limit <= 0 {
@@ -75,17 +76,27 @@ func (p Publisher) PublishPending(ctx context.Context, limit int) error {
 }
 
 func (p Publisher) publishOne(ctx context.Context, event models.OutboxEvent) error {
-	return p.Redis.XAdd(ctx, &redis.XAddArgs{
-		Stream: RedisStreamName,
-		Values: map[string]interface{}{
-			"event_id":       event.EventID,
-			"aggregate_type": event.AggregateType,
-			"aggregate_id":   event.AggregateID,
-			"event_type":     event.EventType,
-			"payload":        event.Payload,
-			"created_at":     event.CreatedAt.Format(time.RFC3339Nano),
-		},
-	}).Err()
+	if core.JetStream == nil {
+		return errors.New("nats: no connection")
+	}
+
+	// 拼装 Subject，如 goshop.events.order.created
+	subject := fmt.Sprintf("goshop.events.%s.%s", strings.ToLower(event.AggregateType), strings.ToLower(event.EventType))
+
+	msgData, err := json.Marshal(map[string]interface{}{
+		"event_id":       event.EventID,
+		"aggregate_type": event.AggregateType,
+		"aggregate_id":   event.AggregateID,
+		"event_type":     event.EventType,
+		"payload":        event.Payload,
+		"created_at":     event.CreatedAt,
+	})
+	if err != nil {
+		return err
+	}
+
+	_, err = core.JetStream.Publish(subject, msgData)
+	return err
 }
 
 func (p Publisher) markSent(id uint) error {

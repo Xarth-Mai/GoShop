@@ -11,5 +11,6 @@ func main() {
 		DefaultPort: app.EnvInt("GOSHOP_PROMOTION_PORT", 8104),
 		SeedData:    true,
 		Register:    handlers.RegisterPromotionServiceRoutes,
+		Background:  handlers.RegisterPromotionServiceSubscribers,
 	})
 }

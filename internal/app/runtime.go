@@ -48,6 +48,15 @@ func RunService(opts ServiceOptions) {
 		core.Logger.Warn("Redis/Valkey 初始化失败，缓存能力将不可用", zap.String("service", opts.Name), zap.Error(err))
 	}
 
+	if err := core.InitNATS(); err != nil {
+		core.Logger.Warn("NATS 初始化失败，消息队列将不可用", zap.String("service", opts.Name), zap.Error(err))
+	} else if opts.Name == "goshop-scheduler-service" {
+		// scheduler 服务自动声明全局消息持久化 Stream
+		if err := core.CreateOrUpdateStream("GOSHOP_EVENTS", []string{"goshop.events.>"}); err != nil {
+			core.Logger.Error("声明 NATS Stream 失败", zap.Error(err))
+		}
+	}
+
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery(), core.MetricsMiddleware())
 	registerHealth(r, opts.Name)

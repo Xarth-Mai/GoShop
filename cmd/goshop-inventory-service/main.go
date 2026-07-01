@@ -11,5 +11,6 @@ func main() {
 		DefaultPort: app.EnvInt("GOSHOP_INVENTORY_PORT", 8103),
 		SeedData:    true,
 		Register:    handlers.RegisterInventoryServiceRoutes,
+		Background:  handlers.RegisterInventoryServiceSubscribers,
 	})
 }

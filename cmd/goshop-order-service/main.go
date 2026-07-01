@@ -11,5 +11,6 @@ func main() {
 		DefaultPort: app.EnvInt("GOSHOP_ORDER_PORT", 8105),
 		SeedData:    true,
 		Register:    handlers.RegisterOrderServiceRoutes,
+		Background:  handlers.RegisterOrderServiceSubscribers,
 	})
 }
