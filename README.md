@@ -3,6 +3,7 @@
 > 一个基于 Go 语言构建的轻量级、高性能通用电商后端系统。
 
 本项目旨在提供一个高并发、高可用的电商基础架构。系统支持两种运行形态：
+
 1. **模块化单体运行时 (Monolith Runtime)**：默认推荐，单进程运行并监听 `:3233` 端口，内置完整的前端静态文件托管（位于 `web/dist`）与后台延迟任务 Worker。
 2. **多进程微服务过渡运行时 (Transitional Multi-Process Microservice Runtime)**：单仓库多进程（Mono-repo, Multi-process）服务形态。9 个核心服务作为独立二进制进程启动，分别运行在 `8101` ~ `8109` 独立端口。由 Caddy 网关（Caddyfile 监听 `:8080`）实现统一的路由分发与前端静态文件代理。在该形态下，所有异步后台 Worker（Outbox 事件发布、订单支付超时释放等）统一由 `goshop-scheduler-service` 调度器服务独立承载，其余 API 服务均为纯粹无状态的 HTTP 服务。
 
@@ -128,7 +129,8 @@ cp config.example.yaml config.yaml
 
 为了平滑演进并降低单体拆分风险，本项目提供了一种单仓库、多进程的微服务过渡运行形态。
 
-#### 核心运行特征：
+#### 核心运行特征
+
 * **多进程独立端口**：9 个微服务分别监听独立的默认端口（`8101` ~ `8109`），各服务的具体职责及接口映射可见 [docs/microservices.md](docs/microservices.md)。
 * **后台任务集中化**：在微服务形态下，所有异步后台 Worker（Outbox 消息发布器、延迟队列超时释放 Worker）都脱离 HTTP 业务进程，统一在 `goshop-scheduler-service`（`:8109`）中以后台协程方式运行。
 * **Caddy 统一网关分发**：使用 Caddy 网关监听 `:8080` 端口，它不仅代理前端静态文件，还根据请求的 API 前缀将请求反向代理到不同的微服务进程。
@@ -138,9 +140,10 @@ cp config.example.yaml config.yaml
   * `PORT` 或 `GOSHOP_SERVICE_PORT`：可直接覆盖该进程的监听端口。
   * 服务特定端口变量：例如 `GOSHOP_USER_PORT` 可以覆盖特定服务的默认端口。
 
-#### 启动命令：
+#### 启动命令
 
 1. **方式 A：通过 go run 逐个启动（本地调试）**：
+
    ```bash
    GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-user-service
    GOSHOP_CONFIG=config.yaml go run ./cmd/goshop-product-service
@@ -154,6 +157,7 @@ cp config.example.yaml config.yaml
    ```
 
 2. **方式 B：编译为二进制并启动**：
+
    ```bash
    mkdir -p bin
    go build -o bin/goshop-user-service ./cmd/goshop-user-service
@@ -172,9 +176,11 @@ cp config.example.yaml config.yaml
 
 3. **配置 Caddy 反向代理网关**：
    使用项目根目录下的 `deploy/Caddyfile.microservices` 启动 Caddy：
+
    ```bash
    caddy run --config deploy/Caddyfile.microservices
    ```
+
    启动后，直接访问网关端口：👉 **[http://localhost:8080](http://localhost:8080)**
 
 默认端口和 Caddy 路由细则详见 [docs/microservices.md](docs/microservices.md) 与 [deploy/Caddyfile.microservices](deploy/Caddyfile.microservices)。

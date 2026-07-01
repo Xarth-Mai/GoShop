@@ -28,7 +28,7 @@ Each service supports configuration overrides via environment variables.
 1. **SecKill Traffic Routing**:
    - Both `goshop-inventory-service` (port `8103`) and `goshop-order-service` (port `8105`) register the `POST /api/seckill` handler in code.
    - In the multi-process microservice runtime, Caddy gateway (see `deploy/Caddyfile.microservices`) directs all `/api/seckill` traffic exclusively to the `inventory` service on port `8103`. The `order` service on port `8105` only handles normal checkout, listings, and detail lookups.
-   
+
 2. **AfterSale Refund Routing Clarification**:
    - The Gin code registers `/api/orders/:id/refund` for users to apply for refunds, and `/api/admin/orders/:id/refund/audit` under the admin route group for auditing.
    - Note that `deploy/Caddyfile.microservices` includes a rule matching `/api/orders/*/refund/audit`. This is redundant as the actual Go backend registers the audit handler at the `/api/admin/...` prefix. All valid audit requests route to port `8107` via `/api/admin/orders/*/refund/audit`.
@@ -84,12 +84,12 @@ Upon successful publication and NATS ACK, the scheduler marks the outbox event a
 
 Current NATS JetStream events:
 
-* `goshop.events.order.ordercreated`
-* `goshop.events.order.ordercanceled`
-* `goshop.events.payment.paymentsucceeded`
-* `goshop.events.aftersale.aftersaleapplied`
-* `goshop.events.aftersale.aftersalerejected`
-* `goshop.events.refund.refundsucceeded`
+- `goshop.events.order.ordercreated`
+- `goshop.events.order.ordercanceled`
+- `goshop.events.payment.paymentsucceeded`
+- `goshop.events.aftersale.aftersaleapplied`
+- `goshop.events.aftersale.aftersalerejected`
+- `goshop.events.refund.refundsucceeded`
 
 ---
 
@@ -97,19 +97,23 @@ Current NATS JetStream events:
 
 To ensure absolute database isolation, services communicate synchronously via point-to-point HTTP-RPC under the `/api/internal/*` path.
 All internal requests require a secure verification header:
-* `X-Internal-Token`: `goshop_internal_communication_secret_token`
+
+- `X-Internal-Token`: `goshop_internal_communication_secret_token`
 
 ### 1. Product Service (:8102)
 
 #### GET `/api/internal/products/:id`
-* **Description**: Fetch Sku detail information by Sku ID.
-* **Response**: Sku JSON object.
+
+- **Description**: Fetch Sku detail information by Sku ID.
+- **Response**: Sku JSON object.
 
 ### 2. Inventory Service (:8103)
 
 #### POST `/api/internal/inventory/reserve`
-* **Description**: Lock/reserve stock for an order.
-* **Payload**:
+
+- **Description**: Lock/reserve stock for an order.
+- **Payload**:
+
   ```json
   {
     "orderId": "GS-1700000-01",
@@ -119,18 +123,22 @@ All internal requests require a secure verification header:
     ]
   }
   ```
-* **Response**: `{ "status": "success" }`
+
+- **Response**: `{ "status": "success" }`
 
 #### POST `/api/internal/inventory/release`
-* **Description**: Release/unlock reserved stock for canceled orders.
-* **Payload**: `{ "orderId": "GS-1700000-01" }`
-* **Response**: `{ "status": "success" }`
+
+- **Description**: Release/unlock reserved stock for canceled orders.
+- **Payload**: `{ "orderId": "GS-1700000-01" }`
+- **Response**: `{ "status": "success" }`
 
 ### 3. Promotion/Coupon Service (:8104)
 
 #### POST `/api/internal/promotion/candidates`
-* **Description**: Fetch all eligible coupons and calculate potential discounts for a shopping cart.
-* **Payload**:
+
+- **Description**: Fetch all eligible coupons and calculate potential discounts for a shopping cart.
+- **Payload**:
+
   ```json
   {
     "userId": 1,
@@ -138,11 +146,14 @@ All internal requests require a secure verification header:
     "subtotal": 45000
   }
   ```
-* **Response**: Array of eligible CouponCandidate objects.
+
+- **Response**: Array of eligible CouponCandidate objects.
 
 #### POST `/api/internal/promotion/lock`
-* **Description**: Lock a user coupon to prevent double-spending during order checkout.
-* **Payload**:
+
+- **Description**: Lock a user coupon to prevent double-spending during order checkout.
+- **Payload**:
+
   ```json
   {
     "userId": 1,
@@ -151,18 +162,22 @@ All internal requests require a secure verification header:
     "subtotal": 45000
   }
   ```
-* **Response**: `{ "discountAmount": 1000 }`
+
+- **Response**: `{ "discountAmount": 1000 }`
 
 #### POST `/api/internal/promotion/release`
-* **Description**: Release a locked user coupon for canceled orders.
-* **Payload**:
+
+- **Description**: Release a locked user coupon for canceled orders.
+- **Payload**:
+
   ```json
   {
     "userCouponId": 1,
     "orderId": "GS-1700000-01"
   }
   ```
-* **Response**: `{ "status": "success" }`
+
+- **Response**: `{ "status": "success" }`
 
 ---
 

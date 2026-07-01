@@ -45,7 +45,7 @@ for SERVICE in "${SERVICES[@]}"; do
     echo "👉 正在构建 ${SERVICE}..."
     (
         cd "${PROJECT_ROOT}"
-        go build -o "${OUT_BIN}" "./cmd/${SERVICE}"
+        go build -ldflags="-s -w" -o "${OUT_BIN}" "./cmd/${SERVICE}"
     )
     echo "✅ 构建成功 -> ${OUT_BIN}"
 done

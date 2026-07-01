@@ -40,23 +40,29 @@ Copy `config.yaml`, `web/dist`, `deploy/Caddyfile.microservices`, and the releva
 项目在 `deploy/` 目录提供了辅助脚本，用于在本地快速构建和测试微服务集群：
 
 1. **一键构建所有微服务**：
+
    ```bash
    ./deploy/build.sh
    ```
+
    该脚本会自动编译所有 9 个微服务并将可执行二进制文件输出到本地的 `bin/` 目录。
 
 2. **后台并发拉起所有微服务**：
+
    ```bash
    ./deploy/smoke_run.sh start
    ```
+
    它会使用 `nohup` 在后台并发启动所有微服务，并将日志重定向输出到 `logs/goshop-*-service.log`。
 
 3. **查看微服务进程运行状态**：
+
    ```bash
    ./deploy/smoke_run.sh status
    ```
 
 4. **一键清理并停止所有微服务**：
+
    ```bash
    ./deploy/smoke_run.sh stop
    ```
