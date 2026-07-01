@@ -83,8 +83,11 @@ func InitDB(serviceName string) error {
 		}
 	}
 
-	if err := migrateLegacyOrderStatuses(DB); err != nil {
-		return err
+	switch serviceName {
+	case "", "goshop-order-service":
+		if err := migrateLegacyOrderStatuses(DB); err != nil {
+			return err
+		}
 	}
 
 	sqlDB, err := DB.DB()
