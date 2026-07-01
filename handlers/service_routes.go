@@ -26,6 +26,8 @@ func RegisterUserServiceRoutes(r *gin.Engine) {
 	protected.POST("/addresses", SaveAddress)
 	protected.DELETE("/addresses/:id", DeleteAddress)
 	protected.PUT("/addresses/:id/default", SetDefaultAddress)
+
+	RegisterInternalRoutes(r)
 }
 
 func RegisterProductServiceRoutes(r *gin.Engine) {
@@ -43,6 +45,8 @@ func RegisterCartServiceRoutes(r *gin.Engine) {
 	protected.POST("/cart", AddOrUpdateCart)
 	protected.DELETE("/cart/:skuId", RemoveFromCart)
 	protected.POST("/cart/sync", SyncCart)
+
+	RegisterInternalRoutes(r)
 }
 
 func RegisterPromotionServiceRoutes(r *gin.Engine) {

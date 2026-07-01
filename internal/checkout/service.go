@@ -48,6 +48,18 @@ type Preview struct {
 	CouponCandidates     []CouponCandidate `json:"couponCandidates"`
 }
 
+type AddressSnapshot struct {
+	ID            uint   `json:"id"`
+	UserID        uint   `json:"userId"`
+	ReceiverName  string `json:"receiverName"`
+	ReceiverPhone string `json:"receiverPhone"`
+	Province      string `json:"province"`
+	City          string `json:"city"`
+	District      string `json:"district"`
+	DetailAddress string `json:"detailAddress"`
+	FullAddress   string `json:"fullAddress"`
+}
+
 type Service struct {
 	DB *gorm.DB
 }
@@ -61,8 +73,7 @@ func (s Service) Calculate(userID uint, req PreviewRequest) (Preview, error) {
 		return Preview{}, fmt.Errorf("下单商品清单不能为空")
 	}
 	if req.AddressID > 0 {
-		var address models.Address
-		if err := s.DB.Where("id = ? AND user_id = ?", req.AddressID, userID).First(&address).Error; err != nil {
+		if _, err := LoadAddressSnapshot(s.DB, userID, req.AddressID); err != nil {
 			return Preview{}, fmt.Errorf("收货地址不存在")
 		}
 	}
@@ -115,6 +126,19 @@ func (s Service) Calculate(userID uint, req PreviewRequest) (Preview, error) {
 	}
 
 	return preview, nil
+}
+
+func LoadAddressSnapshot(db *gorm.DB, userID, addressID uint) (AddressSnapshot, error) {
+	var address AddressSnapshot
+	err := core.CallInternalService(
+		db,
+		8101,
+		"GET",
+		fmt.Sprintf("/api/internal/addresses/%d/snapshot?userId=%d", addressID, userID),
+		nil,
+		&address,
+	)
+	return address, err
 }
 
 func (s Service) couponCandidates(userID, selectedUserCouponID uint, subtotal int) []CouponCandidate {

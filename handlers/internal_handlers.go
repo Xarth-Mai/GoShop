@@ -32,6 +32,10 @@ func RegisterInternalRoutes(r *gin.Engine) {
 		internal.POST("/orders/:id/refund-complete", internalCompleteOrderRefund)
 		internal.POST("/orders/:id/refund-reject", internalRejectOrderRefund)
 
+		// 1.6 用户与购物车服务接口
+		internal.GET("/addresses/:id/snapshot", internalGetAddressSnapshot)
+		internal.POST("/cart/clear-items", internalClearCartItems)
+
 		// 2. 库存服务接口
 		internal.POST("/inventory/reserve", internalReserveStock)
 		internal.POST("/inventory/release", internalReleaseStock)
@@ -101,6 +105,18 @@ type InternalOrderRefundSource struct {
 	PayStatus       int                       `json:"payStatus"`
 	AfterSaleStatus int                       `json:"afterSaleStatus"`
 	Items           []InternalOrderRefundItem `json:"items"`
+}
+
+type InternalAddressSnapshot struct {
+	ID            uint   `json:"id"`
+	UserID        uint   `json:"userId"`
+	ReceiverName  string `json:"receiverName"`
+	ReceiverPhone string `json:"receiverPhone"`
+	Province      string `json:"province"`
+	City          string `json:"city"`
+	District      string `json:"district"`
+	DetailAddress string `json:"detailAddress"`
+	FullAddress   string `json:"fullAddress"`
 }
 
 func internalGetOrderPaymentSource(c *gin.Context) {
@@ -343,6 +359,71 @@ func internalRejectOrderRefund(c *gin.Context) {
 		}).Error
 	})
 	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "success"})
+}
+
+func internalGetAddressSnapshot(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid address id"})
+		return
+	}
+	userIDValue := uint(0)
+	if userIDRaw := c.Query("userId"); userIDRaw != "" {
+		userID, err := strconv.Atoi(userIDRaw)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
+			return
+		}
+		userIDValue = uint(userID)
+	}
+
+	query := core.ReplicaDB.Where("id = ?", id)
+	if userIDValue > 0 {
+		query = query.Where("user_id = ?", userIDValue)
+	}
+
+	var address models.Address
+	if err := query.First(&address).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "address not found"})
+		return
+	}
+
+	fullAddress := fmt.Sprintf("%s%s%s%s", address.Province, address.City, address.District, address.DetailAddress)
+	c.JSON(http.StatusOK, InternalAddressSnapshot{
+		ID:            address.ID,
+		UserID:        address.UserID,
+		ReceiverName:  string(address.ReceiverName),
+		ReceiverPhone: string(address.ReceiverPhone),
+		Province:      address.Province,
+		City:          address.City,
+		District:      address.District,
+		DetailAddress: string(address.DetailAddress),
+		FullAddress:   fullAddress,
+	})
+}
+
+type InternalClearCartItemsReq struct {
+	UserID uint   `json:"userId"`
+	SkuIDs []uint `json:"skuIds"`
+}
+
+func internalClearCartItems(c *gin.Context) {
+	var req InternalClearCartItemsReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.UserID == 0 || len(req.SkuIDs) == 0 {
+		c.JSON(http.StatusOK, gin.H{"status": "success"})
+		return
+	}
+
+	if err := core.DB.Where("user_id = ? AND sku_id IN ?", req.UserID, req.SkuIDs).Delete(&models.CartItem{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

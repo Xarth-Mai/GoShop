@@ -34,14 +34,14 @@ type Detail struct {
 }
 
 type Service struct {
-	DB        *gorm.DB
-	Checkout  checkout.Service
+	DB       *gorm.DB
+	Checkout checkout.Service
 }
 
 func NewService(db *gorm.DB) Service {
 	return Service{
-		DB:        db,
-		Checkout:  checkout.NewService(db),
+		DB:       db,
+		Checkout: checkout.NewService(db),
 	}
 }
 
@@ -56,8 +56,8 @@ func (s Service) CreateOrder(userID uint, req CreateRequest) (CreateResult, erro
 			return fmt.Errorf("优惠券不可用或已失效")
 		}
 
-		var address models.Address
-		if err := tx.Where("id = ? AND user_id = ?", req.AddressID, userID).First(&address).Error; err != nil {
+		address, err := checkout.LoadAddressSnapshot(tx, userID, req.AddressID)
+		if err != nil {
 			return fmt.Errorf("收货地址不存在")
 		}
 
@@ -84,7 +84,7 @@ func (s Service) CreateOrder(userID uint, req CreateRequest) (CreateResult, erro
 			})
 		}
 
-		receiverAddrSnapshot := fmt.Sprintf("%s%s%s%s", address.Province, address.City, address.District, string(address.DetailAddress))
+		receiverAddrSnapshot := address.FullAddress
 		order := models.Order{
 			ID:                  orderID,
 			UserID:              userID,
@@ -99,8 +99,8 @@ func (s Service) CreateOrder(userID uint, req CreateRequest) (CreateResult, erro
 			PayStatus:           models.PayStatusUnpaid,
 			AfterSaleStatus:     models.AfterSaleStatusNone,
 			UserCouponID:        preview.SelectedUserCouponID,
-			ReceiverName:        string(address.ReceiverName),
-			ReceiverPhone:       string(address.ReceiverPhone),
+			ReceiverName:        address.ReceiverName,
+			ReceiverPhone:       address.ReceiverPhone,
 			ReceiverAddr:        receiverAddrSnapshot,
 			PayExpireAt:         &payExpireAt,
 			Items:               orderItems,
@@ -172,8 +172,11 @@ func (s Service) CreateOrder(userID uint, req CreateRequest) (CreateResult, erro
 			skuIDs = append(skuIDs, item.SkuID)
 		}
 		if len(skuIDs) > 0 {
-			if err := tx.Where("user_id = ? AND sku_id IN ?", userID, skuIDs).Delete(&models.CartItem{}).Error; err != nil {
-				return err
+			if err := core.CallInternalService(tx, 8108, "POST", "/api/internal/cart/clear-items", map[string]interface{}{
+				"userId": userID,
+				"skuIds": skuIDs,
+			}, nil); err != nil {
+				core.Logger.Warn("清理购物车失败", zap.Uint("userId", userID), zap.Error(err))
 			}
 		}
 

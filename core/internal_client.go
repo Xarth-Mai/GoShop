@@ -386,6 +386,54 @@ func fallbackLocal(db *gorm.DB, targetPort int, method, path string, reqBody int
 		})
 	}
 
+	if targetPort == 8101 && method == "GET" && strings.HasPrefix(path, "/api/internal/addresses/") && strings.Contains(path, "/snapshot") {
+		parsed, err := url.Parse("http://internal" + path)
+		if err != nil {
+			return err
+		}
+		parts := strings.Split(parsed.Path, "/")
+		addressID, err := strconv.Atoi(parts[len(parts)-2])
+		if err != nil {
+			return err
+		}
+		userID, _ := strconv.Atoi(parsed.Query().Get("userId"))
+
+		query := db.Where("id = ?", uint(addressID))
+		if userID > 0 {
+			query = query.Where("user_id = ?", uint(userID))
+		}
+		var address models.Address
+		if err := query.First(&address).Error; err != nil {
+			return err
+		}
+		snapshot := struct {
+			ID            uint   `json:"id"`
+			UserID        uint   `json:"userId"`
+			ReceiverName  string `json:"receiverName"`
+			ReceiverPhone string `json:"receiverPhone"`
+			Province      string `json:"province"`
+			City          string `json:"city"`
+			District      string `json:"district"`
+			DetailAddress string `json:"detailAddress"`
+			FullAddress   string `json:"fullAddress"`
+		}{
+			ID:            address.ID,
+			UserID:        address.UserID,
+			ReceiverName:  string(address.ReceiverName),
+			ReceiverPhone: string(address.ReceiverPhone),
+			Province:      address.Province,
+			City:          address.City,
+			District:      address.District,
+			DetailAddress: string(address.DetailAddress),
+			FullAddress:   fmt.Sprintf("%s%s%s%s", address.Province, address.City, address.District, address.DetailAddress),
+		}
+		raw, err := json.Marshal(snapshot)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(raw, respDest)
+	}
+
 	// 2. 优惠券 Candidates 降级 (POST /api/internal/promotion/candidates)
 	if targetPort == 8104 && path == "/api/internal/promotion/candidates" {
 		var reqMap map[string]interface{}
@@ -716,6 +764,24 @@ func fallbackLocal(db *gorm.DB, targetPort int, method, path string, reqBody int
 			}
 			return nil
 		})
+	}
+
+	if targetPort == 8108 && method == "POST" && path == "/api/internal/cart/clear-items" {
+		var req struct {
+			UserID uint   `json:"userId"`
+			SkuIDs []uint `json:"skuIds"`
+		}
+		rawBytes, err := json.Marshal(reqBody)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(rawBytes, &req); err != nil {
+			return err
+		}
+		if req.UserID == 0 || len(req.SkuIDs) == 0 {
+			return nil
+		}
+		return db.Where("user_id = ? AND sku_id IN ?", req.UserID, req.SkuIDs).Delete(&models.CartItem{}).Error
 	}
 
 	return fmt.Errorf("no connection to service at port %d, and fallback local not implemented for path %s", targetPort, path)
