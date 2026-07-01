@@ -208,6 +208,68 @@ func fallbackLocal(db *gorm.DB, targetPort int, method, path string, reqBody int
 		return json.Unmarshal(raw, respDest)
 	}
 
+	if targetPort == 8105 && method == "POST" && path == "/api/internal/orders/seckill-create" {
+		var req struct {
+			OrderID     string    `json:"orderId"`
+			UserID      uint      `json:"userId"`
+			SkuID       uint      `json:"skuId"`
+			Price       int       `json:"price"`
+			Quantity    int       `json:"quantity"`
+			PayExpireAt time.Time `json:"payExpireAt"`
+		}
+		rawBytes, err := json.Marshal(reqBody)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(rawBytes, &req); err != nil {
+			return err
+		}
+		if req.OrderID == "" || req.UserID == 0 || req.SkuID == 0 || req.Price <= 0 || req.Quantity <= 0 {
+			return fmt.Errorf("invalid seckill order request")
+		}
+		return db.Transaction(func(tx *gorm.DB) error {
+			var existing models.Order
+			if err := tx.First(&existing, "id = ?", req.OrderID).Error; err == nil {
+				return nil
+			} else if err != gorm.ErrRecordNotFound {
+				return err
+			}
+			total := req.Price * req.Quantity
+			order := models.Order{
+				ID:                req.OrderID,
+				UserID:            req.UserID,
+				TotalAmount:       total,
+				GoodsOriginAmount: total,
+				PayableAmount:     total,
+				Status:            models.OrderStatusPendingPayment,
+				PayStatus:         models.PayStatusUnpaid,
+				AfterSaleStatus:   models.AfterSaleStatusNone,
+				ReceiverName:      "秒杀快捷收货",
+				ReceiverPhone:     "13800000000",
+				ReceiverAddr:      "虚拟网络秒杀节点",
+				PayExpireAt:       &req.PayExpireAt,
+				Items: []models.OrderItem{{
+					SkuID:         req.SkuID,
+					Price:         req.Price,
+					Quantity:      req.Quantity,
+					OriginAmount:  total,
+					PayableAmount: total,
+				}},
+			}
+			if err := tx.Create(&order).Error; err != nil {
+				return err
+			}
+			return tx.Create(&models.OrderStateLog{
+				OrderID:      req.OrderID,
+				ToStatus:     models.OrderStatusPendingPayment,
+				OperatorType: 1,
+				OperatorID:   req.UserID,
+				Event:        "SECKILL_ORDER_CREATED",
+				Remark:       "秒杀订单创建并预扣 Redis 库存",
+			}).Error
+		})
+	}
+
 	if targetPort == 8105 && method == "GET" && strings.HasPrefix(path, "/api/internal/orders/") && strings.Contains(path, "/refund-source") {
 		parsed, err := url.Parse("http://internal" + path)
 		if err != nil {

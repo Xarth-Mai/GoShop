@@ -28,6 +28,7 @@ func RegisterInternalRoutes(r *gin.Engine) {
 
 		// 1.5 订单服务接口
 		internal.GET("/orders/expired-pending", internalGetExpiredPendingOrders)
+		internal.POST("/orders/seckill-create", internalCreateSeckillOrder)
 		internal.GET("/orders/:id/payment-source", internalGetOrderPaymentSource)
 		internal.GET("/orders/:id/refund-source", internalGetOrderRefundSource)
 		internal.POST("/orders/:id/cancel-pending", internalCancelPendingOrder)
@@ -281,6 +282,75 @@ func internalGetExpiredPendingOrders(c *gin.Context) {
 		ids = append(ids, order.ID)
 	}
 	c.JSON(http.StatusOK, ids)
+}
+
+type InternalCreateSeckillOrderReq struct {
+	OrderID     string    `json:"orderId"`
+	UserID      uint      `json:"userId"`
+	SkuID       uint      `json:"skuId"`
+	Price       int       `json:"price"`
+	Quantity    int       `json:"quantity"`
+	PayExpireAt time.Time `json:"payExpireAt"`
+}
+
+func internalCreateSeckillOrder(c *gin.Context) {
+	var req InternalCreateSeckillOrderReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.OrderID == "" || req.UserID == 0 || req.SkuID == 0 || req.Price <= 0 || req.Quantity <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid seckill order request"})
+		return
+	}
+
+	err := core.DB.Transaction(func(tx *gorm.DB) error {
+		var existing models.Order
+		if err := tx.First(&existing, "id = ?", req.OrderID).Error; err == nil {
+			return nil
+		} else if err != gorm.ErrRecordNotFound {
+			return err
+		}
+
+		total := req.Price * req.Quantity
+		order := models.Order{
+			ID:                req.OrderID,
+			UserID:            req.UserID,
+			TotalAmount:       total,
+			GoodsOriginAmount: total,
+			PayableAmount:     total,
+			Status:            models.OrderStatusPendingPayment,
+			PayStatus:         models.PayStatusUnpaid,
+			AfterSaleStatus:   models.AfterSaleStatusNone,
+			ReceiverName:      "秒杀快捷收货",
+			ReceiverPhone:     "13800000000",
+			ReceiverAddr:      "虚拟网络秒杀节点",
+			PayExpireAt:       &req.PayExpireAt,
+			Items: []models.OrderItem{{
+				SkuID:         req.SkuID,
+				Price:         req.Price,
+				Quantity:      req.Quantity,
+				OriginAmount:  total,
+				PayableAmount: total,
+			}},
+		}
+		if err := tx.Create(&order).Error; err != nil {
+			return err
+		}
+		return tx.Create(&models.OrderStateLog{
+			OrderID:      req.OrderID,
+			ToStatus:     models.OrderStatusPendingPayment,
+			OperatorType: 1,
+			OperatorID:   req.UserID,
+			Event:        "SECKILL_ORDER_CREATED",
+			Remark:       "秒杀订单创建并预扣 Redis 库存",
+		}).Error
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "success"})
 }
 
 type InternalOrderRefundApplyReq struct {

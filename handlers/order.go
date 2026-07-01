@@ -754,49 +754,24 @@ func Seckill(c *gin.Context) {
 	// 2. 获取剩余库存
 	leftStock, _ := core.RedisClient.Get(ctx, "seckill:stock:1").Result()
 
-	// 3. 生成订单并写入数据库 (status=1, 待支付)
+	// 3. 生成订单并交给订单服务写入数据库
 	orderID := fmt.Sprintf("SK-%d-%d", time.Now().Unix(), time.Now().Nanosecond()%1000)
-
-	if core.DB != nil {
-		// 秒杀订单价格固定为 399.00元 (39900分)
-		payExpireAt := time.Now().Add(seckillPendingPaymentSeconds * time.Second)
-		order := models.Order{
-			ID:                orderID,
-			UserID:            userID,
-			TotalAmount:       39900,
-			GoodsOriginAmount: 39900,
-			PayableAmount:     39900,
-			Status:            models.OrderStatusPendingPayment,
-			PayStatus:         models.PayStatusUnpaid,
-			AfterSaleStatus:   models.AfterSaleStatusNone,
-			ReceiverName:      "秒杀快捷收货",
-			ReceiverPhone:     "13800000000",
-			ReceiverAddr:      "虚拟网络秒杀节点",
-			PayExpireAt:       &payExpireAt,
-		}
-		if err := core.DB.Create(&order).Error; err == nil {
-			orderItem := models.OrderItem{
-				OrderID:       orderID,
-				SkuID:         1,
-				Price:         39900,
-				Quantity:      1,
-				OriginAmount:  39900,
-				PayableAmount: 39900,
-			}
-			core.DB.Create(&orderItem)
-			core.DB.Create(&models.OrderStateLog{
-				OrderID:      orderID,
-				ToStatus:     models.OrderStatusPendingPayment,
-				OperatorType: 1,
-				OperatorID:   userID,
-				Event:        "SECKILL_ORDER_CREATED",
-				Remark:       "秒杀订单创建并预扣 Redis 库存",
-			})
-		}
+	payExpireAt := time.Now().Add(seckillPendingPaymentSeconds * time.Second)
+	if err := core.CallInternalService(core.DB, 8105, "POST", "/api/internal/orders/seckill-create", map[string]interface{}{
+		"orderId":     orderID,
+		"userId":      userID,
+		"skuId":       1,
+		"price":       39900,
+		"quantity":    1,
+		"payExpireAt": payExpireAt,
+	}, nil); err != nil {
+		core.RedisClient.IncrBy(ctx, "seckill:stock:1", 1)
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "秒杀订单创建失败: " + err.Error()})
+		return
 	}
 
 	// 4. 加入通用延迟队列 (秒杀订单限短时间内超时支付，以匹配前端倒计时)
-	enqueueOrderPaymentTimeout(orderID, time.Now().Add(seckillPendingPaymentSeconds*time.Second))
+	enqueueOrderPaymentTimeout(orderID, payExpireAt)
 
 	pushSystemLog(ctx, "INFO", fmt.Sprintf("User %d Valkey Lua pre-decrement SUCCESS. Stock left: %s. Order %s. Pay in 15s.", userID, leftStock, orderID))
 
