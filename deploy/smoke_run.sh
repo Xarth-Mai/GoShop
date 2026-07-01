@@ -48,6 +48,17 @@ start_services() {
 
     touch "${PID_FILE}"
 
+    # 优先启动 NATS JetStream 服务
+    if [ -f "${PROJECT_ROOT}/bin/nats-server" ]; then
+        echo "🚀 启动 nATS JetStream (端口: 4222) -> 日志: logs/nats-server.log"
+        nohup "${PROJECT_ROOT}/bin/nats-server" -js > "${LOG_DIR}/nats-server.log" 2>&1 &
+        PID=$!
+        echo "nats-server:${PID}" >> "${PID_FILE}"
+        sleep 0.5
+    else
+        echo "⚠️ 未找到 nats-server 二进制文件，跳过启动 NATS JetStream。"
+    fi
+
     # 各服务的默认端口配置（对应 docs/microservices.md 规划）
     declare -A PORTS=(
         ["goshop-user-service"]="8101"

@@ -1,6 +1,11 @@
 package payment
 
 import (
+	"context"
+	"encoding/json"
+	"net"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -8,6 +13,7 @@ import (
 	"GoShop/internal/testutil"
 	"GoShop/models"
 
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -258,4 +264,99 @@ func TestPaymentService(t *testing.T) {
 			t.Fatalf("expected PaymentSucceeded outbox event: %v", err)
 		}
 	})
+}
+
+func TestPaymentService_IsolatedDB(t *testing.T) {
+	// 1. 初始化独立数据库，只做支付相关的 Table Migrate
+	dbIsolated, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("Failed to open sqlite: %v", err)
+	}
+
+	err = dbIsolated.AutoMigrate(
+		&models.PaymentOrder{},
+		&models.PaymentTransaction{},
+		&models.OutboxEvent{},
+	)
+	if err != nil {
+		t.Fatalf("AutoMigrate failed: %v", err)
+	}
+
+	// 确认 orders 表不存在
+	if dbIsolated.Migrator().HasTable("orders") {
+		t.Fatal("orders table should not exist in payment isolated database")
+	}
+
+	// 2. 启动模拟的订单微服务 HTTP 服务监听 8105 端口，响应 payment-source RPC 请求
+	listener, err := net.Listen("tcp", "127.0.0.1:8105")
+	if err != nil {
+		t.Fatalf("Failed to listen on 127.0.0.1:8105: %v", err)
+	}
+	defer listener.Close()
+
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/payment-source") {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"orderId":      "ORDER-ISO-1234",
+					"userId":       1,
+					"totalAmount":  99900,
+					"status":       10, // Pending Payment
+					"payStatus":    0,  // Unpaid
+					"userCouponId": 0,
+				})
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}),
+	}
+	go srv.Serve(listener)
+	defer srv.Shutdown(context.Background())
+
+	// 3. 执行支付逻辑
+	svc := NewService(dbIsolated)
+
+	// 创建支付单
+	res, err := svc.CreateOrGetPaymentOrder(1, "ORDER-ISO-1234")
+	if err != nil {
+		t.Fatalf("CreateOrGetPaymentOrder failed: %v", err)
+	}
+	if res.Amount != 99900 || res.OrderID != "ORDER-ISO-1234" {
+		t.Errorf("unexpected payment order result: %+v", res)
+	}
+
+	// 验证支付单已落库
+	var payment models.PaymentOrder
+	if err := dbIsolated.First(&payment, "id = ?", res.PaymentOrderID).Error; err != nil {
+		t.Fatalf("failed to query payment order: %v", err)
+	}
+	if payment.Amount != 99900 || payment.Status != models.PaymentStatusCreated {
+		t.Errorf("unexpected payment status: %+v", payment)
+	}
+
+	// 执行支付
+	payRes, err := svc.PayMockOrder(1, "ORDER-ISO-1234")
+	if err != nil {
+		t.Fatalf("PayMockOrder failed: %v", err)
+	}
+	if payRes.PaymentOrderID != res.PaymentOrderID {
+		t.Errorf("unexpected pay result: %+v", payRes)
+	}
+
+	// 验证支付单状态更新为已支付
+	if err := dbIsolated.First(&payment, "id = ?", res.PaymentOrderID).Error; err != nil {
+		t.Fatalf("failed to query payment order: %v", err)
+	}
+	if payment.Status != models.PaymentStatusPaid {
+		t.Errorf("expected status Paid, got %d", payment.Status)
+	}
+
+	// 验证支付流水已生成
+	var count int64
+	dbIsolated.Model(&models.PaymentTransaction{}).Where("payment_order_id = ?", res.PaymentOrderID).Count(&count)
+	if count != 1 {
+		t.Errorf("expected 1 transaction, got %d", count)
+	}
 }

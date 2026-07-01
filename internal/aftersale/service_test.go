@@ -1,6 +1,11 @@
 package aftersale
 
 import (
+	"context"
+	"encoding/json"
+	"net"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -8,6 +13,7 @@ import (
 	"GoShop/internal/testutil"
 	"GoShop/models"
 
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -154,5 +160,130 @@ func TestAfterSaleFullRefundAndReject(t *testing.T) {
 	}
 	if rejected.Status != models.OrderStatusRefundRejected || rejected.AfterSaleStatus != models.AfterSaleStatusRejected {
 		t.Fatalf("expected refund rejected state, got status=%d aftersale=%d", rejected.Status, rejected.AfterSaleStatus)
+	}
+}
+
+func TestAfterSaleService_IsolatedDB(t *testing.T) {
+	// 1. 初始化独立数据库，只做售后相关的 Table Migrate
+	dbIsolated, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("Failed to open sqlite: %v", err)
+	}
+
+	err = dbIsolated.AutoMigrate(
+		&models.AfterSaleOrder{},
+		&models.AfterSaleItem{},
+		&models.RefundOrder{},
+		&models.AccountingEntry{},
+		&models.OutboxEvent{},
+		&models.InboxEvent{},
+	)
+	if err != nil {
+		t.Fatalf("AutoMigrate failed: %v", err)
+	}
+
+	// 确认 orders 和 sku_inventories 表不存在
+	if dbIsolated.Migrator().HasTable("orders") || dbIsolated.Migrator().HasTable("sku_inventories") {
+		t.Fatal("orders and sku_inventories tables should not exist in aftersale isolated database")
+	}
+
+	// 2. 启动模拟的订单微服务 HTTP 服务监听 8105 端口，响应 refund-source, refund-apply, refund-complete RPC 请求
+	orderListener, err := net.Listen("tcp", "127.0.0.1:8105")
+	if err != nil {
+		t.Fatalf("Failed to listen on 127.0.0.1:8105: %v", err)
+	}
+	defer orderListener.Close()
+
+	orderSrv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/refund-source") {
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"orderId":         "ORDER-AS-ISO-01",
+					"userId":          1,
+					"totalAmount":     39900,
+					"status":          20, // Paid
+					"payStatus":       20, // Paid
+					"afterSaleStatus": 0,
+					"items": []map[string]interface{}{
+						{
+							"orderItemId":        1,
+							"skuId":              1,
+							"quantity":           1,
+							"payableAmount":      39900,
+							"refundedAmount":     0,
+							"refundableQuantity": 1,
+							"refundableAmount":   39900,
+						},
+					},
+				})
+				return
+			}
+			if r.Method == "POST" && (strings.Contains(r.URL.Path, "/refund-apply") || strings.Contains(r.URL.Path, "/refund-complete")) {
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(`{"status":"success"}`))
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}),
+	}
+	go orderSrv.Serve(orderListener)
+	defer orderSrv.Shutdown(context.Background())
+
+	// 3. 启动模拟的库存微服务 HTTP 服务监听 8103 端口，响应 inventory/restock RPC 请求
+	invListener, err := net.Listen("tcp", "127.0.0.1:8103")
+	if err != nil {
+		t.Fatalf("Failed to listen on 127.0.0.1:8103: %v", err)
+	}
+	defer invListener.Close()
+
+	invSrv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if r.Method == "POST" && strings.Contains(r.URL.Path, "/inventory/restock") {
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(`{"status":"success"}`))
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}),
+	}
+	go invSrv.Serve(invListener)
+	defer invSrv.Shutdown(context.Background())
+
+	// 4. 执行售后逻辑，使用售后服务独占的 dbIsolated 连接
+	svc := NewService(dbIsolated)
+
+	// 申请售后退款
+	err = svc.ApplyRefund(1, "ORDER-AS-ISO-01", ApplyRequest{
+		RefundReason: "isolated test refund",
+	})
+	if err != nil {
+		t.Fatalf("ApplyRefund isolated failed: %v", err)
+	}
+
+	// 验证售后单已落库至 dbIsolated
+	var asOrder models.AfterSaleOrder
+	if err := dbIsolated.First(&asOrder, "order_id = ?", "ORDER-AS-ISO-01").Error; err != nil {
+		t.Fatalf("failed to query aftersale order: %v", err)
+	}
+	if asOrder.ApplyAmount != 39900 || asOrder.Status != models.AfterSaleStatusApplying {
+		t.Errorf("unexpected aftersale order: %+v", asOrder)
+	}
+
+	// 同意售后申请
+	err = svc.AuditRefund("ORDER-AS-ISO-01", AuditRequest{Action: "approve"})
+	if err != nil {
+		t.Fatalf("AuditRefund isolated failed: %v", err)
+	}
+
+	// 验证退款单已在 dbIsolated 落库
+	var refundOrder models.RefundOrder
+	if err := dbIsolated.First(&refundOrder, "order_id = ?", "ORDER-AS-ISO-01").Error; err != nil {
+		t.Fatalf("failed to query refund order: %v", err)
+	}
+	if refundOrder.Amount != 39900 || refundOrder.Status != models.RefundStatusSuccess {
+		t.Errorf("unexpected refund order: %+v", refundOrder)
 	}
 }

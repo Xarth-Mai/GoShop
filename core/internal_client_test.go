@@ -2,6 +2,7 @@ package core_test
 
 import (
 	"testing"
+	"time"
 
 	"GoShop/core"
 	"GoShop/internal/testutil"
@@ -159,6 +160,221 @@ func TestCallInternalService_Fallback(t *testing.T) {
 		db.Where("order_id = ?", "ORD-TEST-FALLBACK").First(&reservation)
 		if reservation.Status != models.ReservationStatusReleased {
 			t.Errorf("expected reservation status to be Released, got %d", reservation.Status)
+		}
+	})
+
+	t.Run("User Address Snapshot and Missing Address Fallback", func(t *testing.T) {
+		addr := models.Address{
+			ID:            101,
+			UserID:        1,
+			ReceiverName:  "Test Address Receiver",
+			ReceiverPhone: "13800000000",
+			Province:      "Test Province",
+			City:          "Test City",
+			District:      "Test District",
+			DetailAddress: "Test Detail Address",
+		}
+		if err := db.Create(&addr).Error; err != nil {
+			t.Fatalf("create test address: %v", err)
+		}
+
+		var snapshot struct {
+			ID            uint   `json:"id"`
+			UserID        uint   `json:"userId"`
+			ReceiverName  string `json:"receiverName"`
+			ReceiverPhone string `json:"receiverPhone"`
+			Province      string `json:"province"`
+			City          string `json:"city"`
+			District      string `json:"district"`
+			DetailAddress string `json:"detailAddress"`
+			FullAddress   string `json:"fullAddress"`
+		}
+
+		err := core.CallInternalService(db, 8101, "GET", "/api/internal/addresses/101/snapshot?userId=1", nil, &snapshot)
+		if err != nil {
+			t.Fatalf("address snapshot fallback failed: %v", err)
+		}
+		if snapshot.ID != 101 || snapshot.ReceiverName != "Test Address Receiver" {
+			t.Errorf("unexpected snapshot content: %+v", snapshot)
+		}
+
+		err = core.CallInternalService(db, 8101, "GET", "/api/internal/addresses/9999/snapshot?userId=1", nil, &snapshot)
+		if err == nil {
+			t.Fatal("expected error for missing address, got nil")
+		}
+	})
+
+	t.Run("Cart Clear Items Idempotency Fallback", func(t *testing.T) {
+		item := models.CartItem{
+			UserID:   1,
+			SkuID:    1,
+			Quantity: 2,
+		}
+		db.Create(&item)
+
+		reqBody := map[string]interface{}{
+			"userId": 1,
+			"skuIds": []uint{1},
+		}
+
+		err := core.CallInternalService(db, 8108, "POST", "/api/internal/cart/clear-items", reqBody, nil)
+		if err != nil {
+			t.Fatalf("first clear-items failed: %v", err)
+		}
+
+		var count int64
+		db.Model(&models.CartItem{}).Where("user_id = ? AND sku_id = ?", 1, 1).Count(&count)
+		if count != 0 {
+			t.Errorf("expected 0 cart items, got %d", count)
+		}
+
+		err = core.CallInternalService(db, 8108, "POST", "/api/internal/cart/clear-items", reqBody, nil)
+		if err != nil {
+			t.Fatalf("second clear-items should be idempotent, got: %v", err)
+		}
+	})
+
+	t.Run("Order Refund Source Fallback", func(t *testing.T) {
+		orderID := "ORDER-REFUND-SRC-01"
+		order := models.Order{
+			ID:          orderID,
+			UserID:      1,
+			TotalAmount: 10000,
+			Status:      models.OrderStatusPaid,
+			PayStatus:   models.PayStatusPaid,
+			Items: []models.OrderItem{
+				{
+					SkuID:         1,
+					Price:         10000,
+					Quantity:      1,
+					OriginAmount:  10000,
+					PayableAmount: 10000,
+				},
+			},
+		}
+		db.Create(&order)
+
+		var refundSrc struct {
+			OrderID         string `json:"orderId"`
+			UserID          uint   `json:"userId"`
+			TotalAmount     int    `json:"totalAmount"`
+			Status          int    `json:"status"`
+			PayStatus       int    `json:"payStatus"`
+			AfterSaleStatus int    `json:"afterSaleStatus"`
+		}
+
+		err := core.CallInternalService(db, 8105, "GET", "/api/internal/orders/"+orderID+"/refund-source?userId=1", nil, &refundSrc)
+		if err != nil {
+			t.Fatalf("order refund-source fallback failed: %v", err)
+		}
+		if refundSrc.OrderID != orderID || refundSrc.TotalAmount != 10000 {
+			t.Errorf("unexpected refund source: %+v", refundSrc)
+		}
+	})
+
+	t.Run("Order Seckill Create Fallback", func(t *testing.T) {
+		orderID := "SK-TEST-0001"
+		reqBody := map[string]interface{}{
+			"orderId":     orderID,
+			"userId":      1,
+			"skuId":       1,
+			"price":       39900,
+			"quantity":    1,
+			"payExpireAt": time.Now().Add(15 * time.Minute),
+		}
+
+		err := core.CallInternalService(db, 8105, "POST", "/api/internal/orders/seckill-create", reqBody, nil)
+		if err != nil {
+			t.Fatalf("seckill-create fallback failed: %v", err)
+		}
+
+		var o models.Order
+		err = db.Preload("Items").First(&o, "id = ?", orderID).Error
+		if err != nil {
+			t.Fatalf("failed to query seckill order: %v", err)
+		}
+		if o.TotalAmount != 39900 || len(o.Items) != 1 || o.Items[0].SkuID != 1 {
+			t.Errorf("unexpected seckill order: %+v", o)
+		}
+	})
+
+	t.Run("Order Cancel Pending Fallback", func(t *testing.T) {
+		orderID := "ORD-CANCEL-PENDING-01"
+		order := models.Order{
+			ID:            orderID,
+			UserID:        1,
+			TotalAmount:   10000,
+			PayableAmount: 10000,
+			Status:        models.OrderStatusPendingPayment,
+			PayStatus:     models.PayStatusUnpaid,
+			UserCouponID:  201,
+		}
+		db.Create(&order)
+
+		userCoupon := models.UserCoupon{
+			ID:            201,
+			UserID:        1,
+			CouponID:      1,
+			Status:        models.UserCouponStatusLocked,
+			LockedOrderID: orderID,
+		}
+		db.Save(&userCoupon)
+
+		reqBody := map[string]interface{}{
+			"reason": "支付超时自动取消",
+		}
+
+		var resp struct {
+			OrderID  string `json:"orderId"`
+			Status   int    `json:"status"`
+			Canceled bool   `json:"canceled"`
+		}
+		err := core.CallInternalService(db, 8105, "POST", "/api/internal/orders/"+orderID+"/cancel-pending", reqBody, &resp)
+		if err != nil {
+			t.Fatalf("cancel-pending fallback failed: %v", err)
+		}
+
+		var o models.Order
+		db.First(&o, "id = ?", orderID)
+		if o.Status != models.OrderStatusCanceled {
+			t.Errorf("expected status Canceled (60), got %d", o.Status)
+		}
+
+		var uc models.UserCoupon
+		db.First(&uc, 201)
+		if uc.Status != models.UserCouponStatusAvailable {
+			t.Errorf("expected coupon status Available (0), got %d", uc.Status)
+		}
+	})
+
+	t.Run("Order Expired Pending Fallback", func(t *testing.T) {
+		orderID := "ORD-EXPIRED-PENDING-01"
+		pastTime := time.Now().Add(-10 * time.Minute)
+		order := models.Order{
+			ID:          orderID,
+			UserID:      1,
+			TotalAmount: 10000,
+			Status:      models.OrderStatusPendingPayment,
+			PayStatus:   models.PayStatusUnpaid,
+			PayExpireAt: &pastTime,
+		}
+		db.Create(&order)
+
+		var expiredIDs []string
+		err := core.CallInternalService(db, 8105, "GET", "/api/internal/orders/expired-pending?limit=10", nil, &expiredIDs)
+		if err != nil {
+			t.Fatalf("expired-pending fallback failed: %v", err)
+		}
+
+		found := false
+		for _, id := range expiredIDs {
+			if id == orderID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected expired order ID %s to be in list: %v", orderID, expiredIDs)
 		}
 	})
 }

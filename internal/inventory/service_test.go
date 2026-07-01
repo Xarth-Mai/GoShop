@@ -220,3 +220,99 @@ func TestInventoryService(t *testing.T) {
 		}
 	})
 }
+
+func TestInventoryService_ValidationAndNonNegative(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	svc := NewService(db)
+	skuID := uint(1)
+
+	// 1. 负数或零预占数量测试
+	t.Run("ReserveStock_RejectNegativeOrZero", func(t *testing.T) {
+		tx := db.Begin()
+		defer tx.Rollback()
+
+		err := svc.ReserveStock(tx, "TEST-NEG-01", 1, []ReserveItem{{SkuID: skuID, Quantity: -10}}, time.Now().Add(10*time.Minute))
+		if err == nil {
+			t.Error("expected error when reserving negative quantity, got nil")
+		}
+
+		err = svc.ReserveStock(tx, "TEST-NEG-02", 1, []ReserveItem{{SkuID: skuID, Quantity: 0}}, time.Now().Add(10*time.Minute))
+		if err == nil {
+			t.Error("expected error when reserving zero quantity, got nil")
+		}
+	})
+
+	// 2. 负数或零回补数量测试
+	t.Run("RestockItems_RejectNegativeOrZero", func(t *testing.T) {
+		tx := db.Begin()
+		defer tx.Rollback()
+
+		err := svc.RestockItemsForOrder(tx, "TEST-NEG-03", []RestockItem{{SkuID: skuID, Quantity: -5}})
+		if err == nil {
+			t.Error("expected error when restocking negative quantity, got nil")
+		}
+
+		err = svc.RestockItemsForOrder(tx, "TEST-NEG-04", []RestockItem{{SkuID: skuID, Quantity: 0}})
+		if err == nil {
+			t.Error("expected error when restocking zero quantity, got nil")
+		}
+	})
+
+	// 3. 库存不足时（Sold 不够扣，或 Reserved 不够释放/确认）时，拒绝更新并保护非负性
+	t.Run("Restock_InsufficientSold", func(t *testing.T) {
+		tx := db.Begin()
+		defer tx.Rollback()
+
+		// 获取当前库存信息
+		var before models.SkuInventory
+		if err := tx.First(&before, "sku_id = ?", skuID).Error; err != nil {
+			t.Fatalf("query inventory: %v", err)
+		}
+
+		// 尝试回补超过已售的数量
+		err := svc.RestockItemsForOrder(tx, "TEST-NEG-05", []RestockItem{{SkuID: skuID, Quantity: before.Sold + 10}})
+		if err == nil {
+			t.Error("expected error when restocking more than sold quantity, got nil")
+		}
+
+		// 验证库存字段没有变为负数，且保持一致
+		var after models.SkuInventory
+		tx.First(&after, "sku_id = ?", skuID)
+		if after.Sold < 0 || after.Available < 0 || after.Reserved < 0 {
+			t.Errorf("inventory values became negative: %+v", after)
+		}
+		if after.Sold != before.Sold || after.Available != before.Available {
+			t.Errorf("inventory changed after rejected restock: before=%+v after=%+v", before, after)
+		}
+	})
+
+	t.Run("Confirm_InsufficientReserved", func(t *testing.T) {
+		tx := db.Begin()
+		defer tx.Rollback()
+
+		// 预占 2 件
+		err := svc.ReserveStock(tx, "TEST-NEG-06", 1, []ReserveItem{{SkuID: skuID, Quantity: 2}}, time.Now().Add(10*time.Minute))
+		if err != nil {
+			t.Fatalf("ReserveStock: %v", err)
+		}
+
+		// 手动修改数据库中的预占记录数量，使其大于目前已 reserved 的值
+		reservationID := ReservationID("TEST-NEG-06", skuID)
+		if err := tx.Model(&models.InventoryReservation{}).Where("id = ?", reservationID).Update("quantity", 100).Error; err != nil {
+			t.Fatalf("failed to update reservation: %v", err)
+		}
+
+		// 确认扣减应该失败，因为 reserved 只有 2，无法扣除 100
+		err = svc.ConfirmOrderReservations(tx, "TEST-NEG-06")
+		if err == nil {
+			t.Error("expected error when confirming more than reserved quantity, got nil")
+		}
+
+		// 验证库存字段保持非负
+		var after models.SkuInventory
+		tx.First(&after, "sku_id = ?", skuID)
+		if after.Sold < 0 || after.Available < 0 || after.Reserved < 0 {
+			t.Errorf("inventory values became negative after failed confirm: %+v", after)
+		}
+	})
+}
