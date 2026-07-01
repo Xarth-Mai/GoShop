@@ -62,7 +62,7 @@ func InitDB(serviceName string) error {
 	case "goshop-cart-service":
 		migrateModels = []interface{}{&models.CartItem{}}
 	case "goshop-scheduler-service":
-		migrateModels = []interface{}{&models.OutboxEvent{}}
+		migrateModels = []interface{}{&models.OutboxEvent{}, &models.DeadLetterOrder{}}
 	default:
 		// 兜底（空服务名，如单体运行/测试），进行全量 Model 自动迁移，保持向下兼容
 		migrateModels = []interface{}{

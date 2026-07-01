@@ -13,6 +13,7 @@ import (
 	"GoShop/models"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // InternalToken 内部安全鉴权 Token，防止外网恶意请求内部 API
@@ -178,6 +179,35 @@ func fallbackLocal(db *gorm.DB, targetPort int, method, path string, reqBody int
 		return json.Unmarshal(raw, respDest)
 	}
 
+	if targetPort == 8105 && method == "GET" && strings.HasPrefix(path, "/api/internal/orders/expired-pending") {
+		parsed, err := url.Parse("http://internal" + path)
+		if err != nil {
+			return err
+		}
+		limit := 100
+		if rawLimit := parsed.Query().Get("limit"); rawLimit != "" {
+			if parsedLimit, err := strconv.Atoi(rawLimit); err == nil && parsedLimit > 0 {
+				limit = parsedLimit
+			}
+		}
+		var orders []models.Order
+		if err := db.Select("id").
+			Where("status = ? AND pay_expire_at IS NOT NULL AND pay_expire_at < ?", models.OrderStatusPendingPayment, time.Now()).
+			Limit(limit).
+			Find(&orders).Error; err != nil {
+			return err
+		}
+		ids := make([]string, 0, len(orders))
+		for _, order := range orders {
+			ids = append(ids, order.ID)
+		}
+		raw, err := json.Marshal(ids)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(raw, respDest)
+	}
+
 	if targetPort == 8105 && method == "GET" && strings.HasPrefix(path, "/api/internal/orders/") && strings.Contains(path, "/refund-source") {
 		parsed, err := url.Parse("http://internal" + path)
 		if err != nil {
@@ -291,6 +321,144 @@ func fallbackLocal(db *gorm.DB, targetPort int, method, path string, reqBody int
 				Remark:       reason,
 			}).Error
 		})
+	}
+
+	if targetPort == 8105 && method == "POST" && strings.HasPrefix(path, "/api/internal/orders/") && strings.Contains(path, "/cancel-pending") {
+		parts := strings.Split(path, "/")
+		orderID := parts[len(parts)-2]
+		var req struct {
+			Reason string `json:"reason"`
+		}
+		rawBytes, err := json.Marshal(reqBody)
+		if err != nil {
+			return err
+		}
+		_ = json.Unmarshal(rawBytes, &req)
+		if req.Reason == "" {
+			req.Reason = "支付超时自动取消并释放库存"
+		}
+
+		var before models.Order
+		if err := db.Select("id", "status").First(&before, "id = ?", orderID).Error; err != nil {
+			return err
+		}
+		err = db.Transaction(func(tx *gorm.DB) error {
+			var order models.Order
+			if err := tx.First(&order, "id = ?", orderID).Error; err != nil {
+				return err
+			}
+			if order.Status != models.OrderStatusPendingPayment {
+				return nil
+			}
+			fromStatus := order.Status
+			order.Status = models.OrderStatusCanceled
+			if err := tx.Save(&order).Error; err != nil {
+				return err
+			}
+			if order.UserCouponID > 0 && tx.Migrator().HasTable(&models.UserCoupon{}) {
+				now := time.Now()
+				if err := tx.Model(&models.UserCoupon{}).
+					Where("id = ? AND status = ? AND locked_order_id = ?", order.UserCouponID, models.UserCouponStatusLocked, order.ID).
+					Updates(map[string]interface{}{
+						"status":          models.UserCouponStatusAvailable,
+						"locked_order_id": "",
+						"locked_at":       nil,
+						"updated_at":      now,
+					}).Error; err != nil {
+					return err
+				}
+			}
+			if tx.Migrator().HasTable(&models.InventoryReservation{}) {
+				var reservations []models.InventoryReservation
+				if err := tx.Where("order_id = ? AND status = ?", order.ID, models.ReservationStatusReserved).Find(&reservations).Error; err != nil {
+					return err
+				}
+				for _, reservation := range reservations {
+					var inv models.SkuInventory
+					if err := tx.Where("sku_id = ?", reservation.SkuID).First(&inv).Error; err != nil {
+						return err
+					}
+					if inv.Reserved < reservation.Quantity {
+						return fmt.Errorf("SKU %d 预占库存不足，无法释放", reservation.SkuID)
+					}
+					inv.Reserved -= reservation.Quantity
+					inv.Available += reservation.Quantity
+					inv.Version++
+					if err := tx.Save(&inv).Error; err != nil {
+						return err
+					}
+					if err := tx.Model(&reservation).Updates(map[string]interface{}{
+						"status":     models.ReservationStatusReleased,
+						"updated_at": time.Now(),
+					}).Error; err != nil {
+						return err
+					}
+					if tx.Migrator().HasTable(&models.InventoryJournal{}) {
+						if err := tx.Create(&models.InventoryJournal{
+							SkuID:         reservation.SkuID,
+							OrderID:       order.ID,
+							ReservationID: reservation.ID,
+							ChangeType:    "RELEASE",
+							Quantity:      reservation.Quantity,
+						}).Error; err != nil {
+							return err
+						}
+					}
+				}
+			}
+			if err := tx.Create(&models.OrderStateLog{
+				OrderID:      order.ID,
+				FromStatus:   fromStatus,
+				ToStatus:     models.OrderStatusCanceled,
+				OperatorType: 1,
+				OperatorID:   order.UserID,
+				Event:        "ORDER_TIMEOUT_CANCELED",
+				Remark:       req.Reason,
+			}).Error; err != nil {
+				return err
+			}
+			if tx.Migrator().HasTable(&models.OutboxEvent{}) {
+				rawPayload, _ := json.Marshal(map[string]interface{}{
+					"orderId": order.ID,
+					"userId":  order.UserID,
+					"reason":  req.Reason,
+				})
+				now := time.Now()
+				if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&models.OutboxEvent{
+					EventID:       "OrderCanceled:" + order.ID,
+					AggregateType: "order",
+					AggregateID:   order.ID,
+					EventType:     "OrderCanceled",
+					Payload:       string(rawPayload),
+					Status:        models.OutboxStatusPending,
+					NextRetryAt:   now,
+				}).Error; err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		var after models.Order
+		if err := db.Select("id", "status").First(&after, "id = ?", orderID).Error; err != nil {
+			return err
+		}
+		resp := struct {
+			OrderID  string `json:"orderId"`
+			Status   int    `json:"status"`
+			Canceled bool   `json:"canceled"`
+		}{
+			OrderID:  orderID,
+			Status:   after.Status,
+			Canceled: before.Status == models.OrderStatusPendingPayment && after.Status == models.OrderStatusCanceled,
+		}
+		raw, err := json.Marshal(resp)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(raw, respDest)
 	}
 
 	if targetPort == 8105 && method == "POST" && strings.HasPrefix(path, "/api/internal/orders/") && strings.Contains(path, "/refund-complete") {

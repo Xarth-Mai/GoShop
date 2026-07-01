@@ -8,6 +8,7 @@ import (
 
 	"GoShop/core"
 	"GoShop/internal/inventory"
+	ordersvc "GoShop/internal/order"
 	"GoShop/internal/promotion"
 	"GoShop/models"
 
@@ -26,8 +27,10 @@ func RegisterInternalRoutes(r *gin.Engine) {
 		internal.GET("/products/:id/cart-summary", internalGetProductCartSummary)
 
 		// 1.5 订单服务接口
+		internal.GET("/orders/expired-pending", internalGetExpiredPendingOrders)
 		internal.GET("/orders/:id/payment-source", internalGetOrderPaymentSource)
 		internal.GET("/orders/:id/refund-source", internalGetOrderRefundSource)
+		internal.POST("/orders/:id/cancel-pending", internalCancelPendingOrder)
 		internal.POST("/orders/:id/refund-apply", internalApplyOrderRefund)
 		internal.POST("/orders/:id/refund-complete", internalCompleteOrderRefund)
 		internal.POST("/orders/:id/refund-reject", internalRejectOrderRefund)
@@ -214,6 +217,70 @@ func internalGetOrderRefundSource(c *gin.Context) {
 		AfterSaleStatus: order.AfterSaleStatus,
 		Items:           items,
 	})
+}
+
+type InternalCancelPendingOrderReq struct {
+	Reason string `json:"reason"`
+}
+
+type InternalCancelPendingOrderResp struct {
+	OrderID  string `json:"orderId"`
+	Status   int    `json:"status"`
+	Canceled bool   `json:"canceled"`
+}
+
+func internalCancelPendingOrder(c *gin.Context) {
+	orderID := c.Param("id")
+	var req InternalCancelPendingOrderReq
+	_ = c.ShouldBindJSON(&req)
+	if req.Reason == "" {
+		req.Reason = "支付超时自动取消并释放库存"
+	}
+
+	var before models.Order
+	if err := core.ReplicaDB.Select("id", "status").First(&before, "id = ?", orderID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
+		return
+	}
+
+	if err := ordersvc.NewService(core.DB).CancelPendingOrder(orderID, req.Reason); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	var after models.Order
+	if err := core.ReplicaDB.Select("id", "status").First(&after, "id = ?", orderID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, InternalCancelPendingOrderResp{
+		OrderID:  orderID,
+		Status:   after.Status,
+		Canceled: before.Status == models.OrderStatusPendingPayment && after.Status == models.OrderStatusCanceled,
+	})
+}
+
+func internalGetExpiredPendingOrders(c *gin.Context) {
+	limit := 100
+	if rawLimit := c.Query("limit"); rawLimit != "" {
+		if parsed, err := strconv.Atoi(rawLimit); err == nil && parsed > 0 && parsed <= 1000 {
+			limit = parsed
+		}
+	}
+
+	var orders []models.Order
+	if err := core.ReplicaDB.Select("id").
+		Where("status = ? AND pay_expire_at IS NOT NULL AND pay_expire_at < ?", models.OrderStatusPendingPayment, time.Now()).
+		Limit(limit).
+		Find(&orders).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ids := make([]string, 0, len(orders))
+	for _, order := range orders {
+		ids = append(ids, order.ID)
+	}
+	c.JSON(http.StatusOK, ids)
 }
 
 type InternalOrderRefundApplyReq struct {

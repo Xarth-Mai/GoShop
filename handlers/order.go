@@ -595,14 +595,18 @@ func StartReliableDelayQueueWorker() {
 
 // processCancelOrder 超时订单库事务处理
 func processCancelOrder(orderID string) error {
-	if err := ordersvc.NewService(core.DB).CancelPendingOrder(orderID, "支付超时自动取消并释放库存"); err != nil {
+	var resp struct {
+		OrderID  string `json:"orderId"`
+		Status   int    `json:"status"`
+		Canceled bool   `json:"canceled"`
+	}
+	if err := core.CallInternalService(core.DB, 8105, "POST", fmt.Sprintf("/api/internal/orders/%s/cancel-pending", orderID), map[string]interface{}{
+		"reason": "支付超时自动取消并释放库存",
+	}, &resp); err != nil {
 		return err
 	}
-	if strings.HasPrefix(orderID, "SK-") && core.RedisClient != nil {
-		var order models.Order
-		if err := core.DB.Select("status").First(&order, "id = ?", orderID).Error; err == nil && order.Status == models.OrderStatusCanceled {
-			core.RedisClient.IncrBy(context.Background(), "seckill:stock:1", 1)
-		}
+	if strings.HasPrefix(orderID, "SK-") && resp.Canceled && core.RedisClient != nil {
+		core.RedisClient.IncrBy(context.Background(), "seckill:stock:1", 1)
 	}
 	pushSystemLog(context.Background(), "WARN", fmt.Sprintf("Delay worker: Order %s EXPIRED. Cancelled and released reservations.", orderID))
 	return nil
@@ -668,19 +672,16 @@ func claimDelayTasks(ctx context.Context, sourceKey, processingKey string, now i
 }
 
 func sweepExpiredPendingOrders(ctx context.Context) {
-	var orders []models.Order
-	if err := core.DB.Select("id").
-		Where("status = ? AND pay_expire_at IS NOT NULL AND pay_expire_at < ?", models.OrderStatusPendingPayment, time.Now()).
-		Limit(100).
-		Find(&orders).Error; err != nil {
+	var orderIDs []string
+	if err := core.CallInternalService(core.DB, 8105, "GET", "/api/internal/orders/expired-pending?limit=100", nil, &orderIDs); err != nil {
 		log.Printf("[Worker] 超时订单兜底扫描失败: %v", err)
 		return
 	}
-	for _, order := range orders {
-		if err := processCancelOrder(order.ID); err != nil {
-			log.Printf("[Worker] 超时订单 %s 兜底取消失败: %v", order.ID, err)
+	for _, orderID := range orderIDs {
+		if err := processCancelOrder(orderID); err != nil {
+			log.Printf("[Worker] 超时订单 %s 兜底取消失败: %v", orderID, err)
 		} else {
-			pushSystemLog(ctx, "WARN", fmt.Sprintf("Sweep: Order %s expired and was cancelled.", order.ID))
+			pushSystemLog(ctx, "WARN", fmt.Sprintf("Sweep: Order %s expired and was cancelled.", orderID))
 		}
 	}
 }
