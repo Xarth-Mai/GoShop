@@ -172,6 +172,10 @@ func TestCreateOrder_CouponValidation(t *testing.T) {
 		if uc.UsedAt != nil {
 			t.Errorf("expected user coupon UsedAt to stay nil before payment")
 		}
+		var event models.OutboxEvent
+		if err := db.First(&event, "aggregate_id = ? AND event_type = ?", res.OrderID, "OrderCreated").Error; err != nil {
+			t.Fatalf("expected OrderCreated outbox event: %v", err)
+		}
 	})
 
 	t.Run("Cancel Pending Order Releases Coupon Lock", func(t *testing.T) {
@@ -210,6 +214,10 @@ func TestCreateOrder_CouponValidation(t *testing.T) {
 		}
 		if uc.Status != models.UserCouponStatusAvailable || uc.LockedOrderID != "" || uc.LockedAt != nil {
 			t.Fatalf("expected coupon lock released, got status=%d lockedOrder=%q lockedAt=%v", uc.Status, uc.LockedOrderID, uc.LockedAt)
+		}
+		var event models.OutboxEvent
+		if err := db.First(&event, "aggregate_id = ? AND event_type = ?", res.OrderID, "OrderCanceled").Error; err != nil {
+			t.Fatalf("expected OrderCanceled outbox event: %v", err)
 		}
 	})
 

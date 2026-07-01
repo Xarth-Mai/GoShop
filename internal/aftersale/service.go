@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"GoShop/internal/inventory"
+	"GoShop/internal/outbox"
 	"GoShop/internal/payment"
 	"GoShop/models"
 
@@ -146,7 +147,15 @@ func (s Service) ApplyRefund(userID uint, orderID string, req ApplyRequest) erro
 		if err := tx.Save(&order).Error; err != nil {
 			return err
 		}
-		return appendStateLog(tx, order.ID, fromStatus, models.OrderStatusRefundApplying, userID, "AFTERSALE_APPLIED", req.RefundReason)
+		if err := appendStateLog(tx, order.ID, fromStatus, models.OrderStatusRefundApplying, userID, "AFTERSALE_APPLIED", req.RefundReason); err != nil {
+			return err
+		}
+		return outbox.NewService().Publish(tx, "aftersale", afterSale.ID, "AfterSaleApplied", map[string]interface{}{
+			"afterSaleId": afterSale.ID,
+			"orderId":     order.ID,
+			"userId":      userID,
+			"applyAmount": afterSale.ApplyAmount,
+		})
 	})
 }
 
@@ -286,7 +295,15 @@ func (s Service) approve(tx *gorm.DB, order models.Order) error {
 	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&entries).Error; err != nil {
 		return err
 	}
-	return appendStateLog(tx, order.ID, fromStatus, order.Status, 0, "AFTERSALE_APPROVED", "商家审核通过并模拟退款")
+	if err := appendStateLog(tx, order.ID, fromStatus, order.Status, 0, "AFTERSALE_APPROVED", "商家审核通过并模拟退款"); err != nil {
+		return err
+	}
+	return outbox.NewService().Publish(tx, "refund", refund.ID, "RefundSucceeded", map[string]interface{}{
+		"refundId":    refund.ID,
+		"afterSaleId": afterSale.ID,
+		"orderId":     order.ID,
+		"amount":      refund.Amount,
+	})
 }
 
 func (s Service) reject(tx *gorm.DB, order models.Order) error {
@@ -303,7 +320,13 @@ func (s Service) reject(tx *gorm.DB, order models.Order) error {
 	if err := tx.Save(&order).Error; err != nil {
 		return err
 	}
-	return appendStateLog(tx, order.ID, fromStatus, models.OrderStatusRefundRejected, 0, "AFTERSALE_REJECTED", "商家拒绝退款申请")
+	if err := appendStateLog(tx, order.ID, fromStatus, models.OrderStatusRefundRejected, 0, "AFTERSALE_REJECTED", "商家拒绝退款申请"); err != nil {
+		return err
+	}
+	return outbox.NewService().Publish(tx, "aftersale", afterSale.ID, "AfterSaleRejected", map[string]interface{}{
+		"afterSaleId": afterSale.ID,
+		"orderId":     order.ID,
+	})
 }
 
 func remainingOrderRefundAmount(tx *gorm.DB, order models.Order) int {

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"GoShop/internal/inventory"
+	"GoShop/internal/outbox"
 	"GoShop/internal/promotion"
 	"GoShop/models"
 
@@ -266,7 +267,7 @@ func (s Service) markPaid(tx *gorm.DB, order models.Order, payment models.Paymen
 		return err
 	}
 
-	return tx.Create(&models.OrderStateLog{
+	if err := tx.Create(&models.OrderStateLog{
 		OrderID:      order.ID,
 		FromStatus:   fromStatus,
 		ToStatus:     models.OrderStatusPaid,
@@ -274,5 +275,15 @@ func (s Service) markPaid(tx *gorm.DB, order models.Order, payment models.Paymen
 		OperatorID:   order.UserID,
 		Event:        event,
 		Remark:       remark,
-	}).Error
+	}).Error; err != nil {
+		return err
+	}
+	return outbox.NewService().Publish(tx, "payment", payment.ID, "PaymentSucceeded", map[string]interface{}{
+		"paymentOrderId": payment.ID,
+		"orderId":        order.ID,
+		"userId":         order.UserID,
+		"amount":         payment.Amount,
+		"channel":        payment.Channel,
+		"channelTradeNo": payment.ChannelTradeNo,
+	})
 }

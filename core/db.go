@@ -45,6 +45,8 @@ func InitDB() error {
 		&models.SkuInventory{},
 		&models.InventoryReservation{},
 		&models.InventoryJournal{},
+		&models.OutboxEvent{},
+		&models.InboxEvent{},
 		&models.Address{},
 		&models.Coupon{},
 		&models.UserCoupon{},

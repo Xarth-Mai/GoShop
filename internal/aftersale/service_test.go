@@ -116,6 +116,10 @@ func TestAfterSalePartialRefund(t *testing.T) {
 	if inv.Sold != 1 || inv.Available != 99 {
 		t.Fatalf("expected sold=1 available=99, got sold=%d available=%d", inv.Sold, inv.Available)
 	}
+	var event models.OutboxEvent
+	if err := db.First(&event, "event_type = ? AND aggregate_type = ?", "RefundSucceeded", "refund").Error; err != nil {
+		t.Fatalf("expected RefundSucceeded outbox event: %v", err)
+	}
 }
 
 func TestAfterSaleFullRefundAndReject(t *testing.T) {

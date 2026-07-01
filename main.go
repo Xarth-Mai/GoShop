@@ -351,8 +351,9 @@ func main() {
 			core.DB.Where("order_id LIKE ? OR order_id LIKE ?", "GS-%", "SK-%").Delete(&models.InventoryReservation{})
 			core.DB.Where("id LIKE ? OR id LIKE ?", "GS-%", "SK-%").Delete(&models.Order{})
 			core.DB.Where("order_id LIKE ? OR order_id LIKE ?", "GS-%", "SK-%").Delete(&models.DeadLetterOrder{})
+			core.DB.Where("aggregate_id LIKE ? OR aggregate_id LIKE ?", "GS-%", "SK-%").Delete(&models.OutboxEvent{})
 			// 恢复所有的卡券和购物车
-			core.DB.Exec("UPDATE user_coupons SET status = 0, used_at = NULL")
+			core.DB.Exec("UPDATE user_coupons SET status = 0, used_at = NULL, locked_order_id = '', locked_at = NULL")
 		}
 
 		c.JSON(http.StatusOK, gin.H{"status": "reset"})

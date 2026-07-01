@@ -253,5 +253,9 @@ func TestPaymentService(t *testing.T) {
 		if updatedCoupon.Status != models.UserCouponStatusUsed || updatedCoupon.UsedAt == nil || updatedCoupon.LockedOrderID != "" {
 			t.Fatalf("expected coupon confirmed used, got status=%d usedAt=%v lockedOrder=%q", updatedCoupon.Status, updatedCoupon.UsedAt, updatedCoupon.LockedOrderID)
 		}
+		var event models.OutboxEvent
+		if err := db.First(&event, "aggregate_id = ? AND event_type = ?", PaymentOrderID(order.ID), "PaymentSucceeded").Error; err != nil {
+			t.Fatalf("expected PaymentSucceeded outbox event: %v", err)
+		}
 	})
 }

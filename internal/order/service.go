@@ -6,6 +6,7 @@ import (
 
 	"GoShop/internal/checkout"
 	"GoShop/internal/inventory"
+	"GoShop/internal/outbox"
 	"GoShop/internal/promotion"
 	"GoShop/models"
 
@@ -141,6 +142,14 @@ func (s Service) CreateOrder(userID uint, req CreateRequest) (CreateResult, erro
 		if err := appendStateLog(tx, order.ID, 0, models.OrderStatusPendingPayment, userID, "ORDER_CREATED", "订单创建并预占库存"); err != nil {
 			return err
 		}
+		if err := outbox.NewService().Publish(tx, "order", order.ID, "OrderCreated", map[string]interface{}{
+			"orderId":     order.ID,
+			"userId":      order.UserID,
+			"totalAmount": order.TotalAmount,
+			"payExpireAt": payExpireAt,
+		}); err != nil {
+			return err
+		}
 
 		var skuIDs []uint
 		for _, item := range req.Items {
@@ -179,7 +188,14 @@ func (s Service) CancelPendingOrder(orderID, reason string) error {
 		if err := inventory.NewService(tx).ReleaseOrderReservations(tx, order.ID); err != nil {
 			return err
 		}
-		return appendStateLog(tx, order.ID, fromStatus, models.OrderStatusCanceled, order.UserID, "ORDER_TIMEOUT_CANCELED", reason)
+		if err := appendStateLog(tx, order.ID, fromStatus, models.OrderStatusCanceled, order.UserID, "ORDER_TIMEOUT_CANCELED", reason); err != nil {
+			return err
+		}
+		return outbox.NewService().Publish(tx, "order", order.ID, "OrderCanceled", map[string]interface{}{
+			"orderId": order.ID,
+			"userId":  order.UserID,
+			"reason":  reason,
+		})
 	})
 }
 

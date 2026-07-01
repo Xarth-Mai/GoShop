@@ -27,6 +27,8 @@ func SetupTestDB(t *testing.T) *gorm.DB {
 		&models.SkuInventory{},
 		&models.InventoryReservation{},
 		&models.InventoryJournal{},
+		&models.OutboxEvent{},
+		&models.InboxEvent{},
 		&models.Order{},
 		&models.OrderItem{},
 		&models.OrderPromotionAllocation{},
