@@ -1,0 +1,16 @@
+[Unit]
+Description=GoShop order service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/goshop
+Environment=GOSHOP_CONFIG=/opt/goshop/config.yaml
+ExecStart=/opt/goshop/bin/goshop-order-service
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,91 @@
+{
+    auto_https off
+    admin off
+}
+
+:8080 {
+    encode zstd gzip
+
+    @health path /health
+    handle @health {
+        respond "ok" 200
+    }
+
+    @user path /api/auth/* /api/addresses /api/addresses/*
+    handle @user {
+        reverse_proxy 127.0.0.1:8101 {
+            health_uri /health
+            health_interval 10s
+            health_timeout 2s
+        }
+    }
+
+    @product path /api/categories /api/products /api/products/*
+    handle @product {
+        reverse_proxy 127.0.0.1:8102 {
+            health_uri /health
+            health_interval 10s
+            health_timeout 2s
+        }
+    }
+
+    @inventory path /api/seckill
+    handle @inventory {
+        reverse_proxy 127.0.0.1:8103 {
+            health_uri /health
+            health_interval 5s
+            health_timeout 2s
+        }
+    }
+
+    @promotion path /api/coupons /api/user-coupons /api/user-coupons/*
+    handle @promotion {
+        reverse_proxy 127.0.0.1:8104 {
+            health_uri /health
+            health_interval 10s
+            health_timeout 2s
+        }
+    }
+
+    @aftersale path /api/orders/*/refund /api/orders/*/refund/audit /api/admin/orders/*/refund/audit
+    handle @aftersale {
+        reverse_proxy 127.0.0.1:8107 {
+            health_uri /health
+            health_interval 10s
+            health_timeout 2s
+        }
+    }
+
+    @order path /api/checkout/* /api/orders /api/orders/*
+    handle @order {
+        reverse_proxy 127.0.0.1:8105 {
+            health_uri /health
+            health_interval 5s
+            health_timeout 2s
+        }
+    }
+
+    @payment path /api/pay /api/payments /api/payments/*
+    handle @payment {
+        reverse_proxy 127.0.0.1:8106 {
+            health_uri /health
+            health_interval 5s
+            health_timeout 2s
+        }
+    }
+
+    @cart path /api/cart /api/cart/*
+    handle @cart {
+        reverse_proxy 127.0.0.1:8108 {
+            health_uri /health
+            health_interval 10s
+            health_timeout 2s
+        }
+    }
+
+    handle {
+        root * ./web/dist
+        try_files {path} /index.html
+        file_server
+    }
+}
