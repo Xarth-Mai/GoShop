@@ -15,6 +15,10 @@ const password = ref('')
 const loading = ref(false)
 const errorMsg = ref('')
 
+if (route.query.username) {
+  username.value = String(route.query.username)
+}
+
 const handleLogin = async () => {
   if (!username.value || !password.value) {
     errorMsg.value = '请填写用户名和密码'
@@ -101,6 +105,9 @@ const handleLogin = async () => {
         <Button type="submit" :loading="loading" class="submit-btn">
           进入平台
         </Button>
+        <Button type="button" variant="text" class="register-link" @click="router.push('/register')">
+          还没有账号，立即注册
+        </Button>
       </form>
     </Card>
   </div>
@@ -173,5 +180,9 @@ const handleLogin = async () => {
 .submit-btn {
   width: 100%;
   margin-top: var(--spacing-sm);
+}
+
+.register-link {
+  align-self: center;
 }
 </style>

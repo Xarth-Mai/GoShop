@@ -16,7 +16,7 @@ func TestInventoryService(t *testing.T) {
 
 	userID := uint(1)
 	orderID := "TEST-ORDER-1001"
-	skuID := uint(1) // SeedProducts 中 SKU 1 初始库存为 87
+	skuID := uint(1) // SeedServiceData 中 SKU 1 初始库存为 87
 
 	t.Run("ReserveStock_Success", func(t *testing.T) {
 		tx := db.Begin()

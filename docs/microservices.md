@@ -35,7 +35,7 @@ Each service supports configuration overrides via environment variables.
 
 3. **Background Worker Concentration**:
    - Unlike the monolith mode where background tasks start implicitly inside `main.go`, in the microservice transition mode, HTTP services (ports `8101` ~ `8108`) remain completely stateless.
-   - The `goshop-scheduler-service` (port `8109`) is the single host for background processes. Upon startup, it spawns the transactional Outbox Event Publisher (`outbox.NewPublisher`) to push events to Redis Stream `goshop:events`, and the Reliable Delay Queue Worker (`StartReliableDelayQueueWorker`) to handle ticket timeouts and stock rollbacks.
+   - The `goshop-scheduler-service` (port `8109`) is the single host for background processes. Upon startup, it spawns the transactional Outbox Event Publisher (`outbox.NewPublisher`) to publish events to NATS JetStream subjects such as `goshop.events.payment.paymentsucceeded`, and the Reliable Delay Queue Worker (`StartReliableDelayQueueWorker`) to handle ticket timeouts and stock rollbacks.
 
 ### Port and Configuration Overrides
 

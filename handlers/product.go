@@ -10,6 +10,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// GetCategories 获取商品分类列表
+// @Summary 获取商品分类
+// @Tags product
+// @Produce json
+// @Success 200 {array} models.Category
+// @Router /api/categories [get]
 func GetCategories(c *gin.Context) {
 	var categories []models.Category
 	if core.DB == nil {
@@ -23,6 +29,16 @@ func GetCategories(c *gin.Context) {
 	c.JSON(http.StatusOK, categories)
 }
 
+// GetProducts 分页查询商品
+// @Summary 分页查询商品
+// @Tags product
+// @Produce json
+// @Param categoryId query int false "分类 ID"
+// @Param keyword query string false "搜索关键词"
+// @Param page query int false "页码"
+// @Param pageSize query int false "每页数量"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/products [get]
 func GetProducts(c *gin.Context) {
 	if core.DB == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "数据库未就绪"})
@@ -71,6 +87,14 @@ func GetProducts(c *gin.Context) {
 	})
 }
 
+// GetProduct 查询商品详情
+// @Summary 查询商品详情
+// @Tags product
+// @Produce json
+// @Param id path int true "SPU ID"
+// @Success 200 {object} models.Spu
+// @Failure 404 {object} map[string]interface{}
+// @Router /api/products/{id} [get]
 func GetProduct(c *gin.Context) {
 	if core.DB == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "数据库未就绪"})

@@ -162,6 +162,14 @@ func delayTaskOrderID(member string) string {
 }
 
 // CreateOrder 普通商品多项合并下单接口
+// @Summary 创建订单
+// @Tags order
+// @Accept json
+// @Produce json
+// @Param body body CreateOrderReq true "下单参数"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} map[string]interface{}
+// @Router /api/orders [post]
 func CreateOrder(c *gin.Context) {
 	userIDVal, exists := c.Get("userId")
 	if !exists {
@@ -209,6 +217,14 @@ func CreateOrder(c *gin.Context) {
 }
 
 // PreviewCheckout 后端统一结算试算接口
+// @Summary 结算试算
+// @Tags order
+// @Accept json
+// @Produce json
+// @Param body body checkout.PreviewRequest true "试算参数"
+// @Success 200 {object} checkout.Preview
+// @Failure 400 {object} map[string]interface{}
+// @Router /api/checkout/preview [post]
 func PreviewCheckout(c *gin.Context) {
 	userIDVal, exists := c.Get("userId")
 	if !exists {
@@ -235,6 +251,13 @@ func PreviewCheckout(c *gin.Context) {
 }
 
 // CreatePayment 创建或幂等返回当前用户订单的支付单
+// @Summary 创建支付单
+// @Tags payment
+// @Accept json
+// @Produce json
+// @Param body body CreatePaymentReq true "支付单参数"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/payments [post]
 func CreatePayment(c *gin.Context) {
 	userIDVal, exists := c.Get("userId")
 	if !exists {
@@ -266,6 +289,12 @@ func CreatePayment(c *gin.Context) {
 }
 
 // GetPayment 查询当前用户可访问的支付单
+// @Summary 查询支付单
+// @Tags payment
+// @Produce json
+// @Param id path string true "支付单 ID"
+// @Success 200 {object} models.PaymentOrder
+// @Router /api/payments/{id} [get]
 func GetPayment(c *gin.Context) {
 	userIDVal, exists := c.Get("userId")
 	if !exists {
@@ -292,6 +321,13 @@ func GetPayment(c *gin.Context) {
 }
 
 // PayOrder 支付订单接口
+// @Summary 模拟支付订单
+// @Tags payment
+// @Accept json
+// @Produce json
+// @Param body body PayReq true "支付参数"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/pay [post]
 func PayOrder(c *gin.Context) {
 	userIDVal, exists := c.Get("userId")
 	if !exists {
@@ -328,6 +364,13 @@ func PayOrder(c *gin.Context) {
 }
 
 // MockPaymentCallback 模拟三方支付异步回调，提供金额校验和事件幂等。
+// @Summary 模拟支付回调
+// @Tags payment
+// @Accept json
+// @Produce json
+// @Param body body MockPaymentCallbackReq true "回调参数"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/payments/callback/mock [post]
 func MockPaymentCallback(c *gin.Context) {
 	var req MockPaymentCallbackReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -352,6 +395,12 @@ func MockPaymentCallback(c *gin.Context) {
 }
 
 // GetOrders 查询当前登录用户的订单列表
+// @Summary 查询订单列表
+// @Tags order
+// @Produce json
+// @Param status query int false "订单状态"
+// @Success 200 {array} models.Order
+// @Router /api/orders [get]
 func GetOrders(c *gin.Context) {
 	userIDVal, exists := c.Get("userId")
 	if !exists {
@@ -385,6 +434,12 @@ func GetOrders(c *gin.Context) {
 }
 
 // GetOrderDetail 查询当前登录用户的订单详情聚合信息
+// @Summary 查询订单详情
+// @Tags order
+// @Produce json
+// @Param id path string true "订单 ID"
+// @Success 200 {object} ordersvc.Detail
+// @Router /api/orders/{id} [get]
 func GetOrderDetail(c *gin.Context) {
 	userIDVal, exists := c.Get("userId")
 	if !exists {
@@ -413,6 +468,14 @@ func GetOrderDetail(c *gin.Context) {
 }
 
 // ApplyRefund 发起订单退款申请
+// @Summary 申请售后退款
+// @Tags aftersale
+// @Accept json
+// @Produce json
+// @Param id path string true "订单 ID"
+// @Param body body RefundReq true "退款参数"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/orders/{id}/refund [post]
 func ApplyRefund(c *gin.Context) {
 	userIDVal, exists := c.Get("userId")
 	if !exists {
@@ -461,6 +524,14 @@ func ApplyRefund(c *gin.Context) {
 }
 
 // AuditRefund 商家审核退款
+// @Summary 审核售后退款
+// @Tags aftersale
+// @Accept json
+// @Produce json
+// @Param id path string true "订单 ID"
+// @Param body body AuditRefundReq true "审核参数"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/admin/orders/{id}/refund/audit [post]
 func AuditRefund(c *gin.Context) {
 	orderID := c.Param("id")
 
@@ -632,6 +703,11 @@ end
 `
 
 // Seckill 秒杀下单接口 (高并发原子扣库存)
+// @Summary 秒杀下单
+// @Tags order
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Router /api/seckill [post]
 func Seckill(c *gin.Context) {
 	userIDVal, exists := c.Get("userId")
 	if !exists {

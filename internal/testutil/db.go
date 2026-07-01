@@ -46,7 +46,7 @@ func SetupTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("Failed to auto migrate: %v", err)
 	}
 
-	if err := models.SeedProducts(db); err != nil {
+	if err := models.SeedServiceData(db, ""); err != nil {
 		t.Fatalf("Failed to seed data: %v", err)
 	}
 

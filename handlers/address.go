@@ -22,6 +22,11 @@ type AddressReq struct {
 }
 
 // GetAddresses 获取当前用户的地址列表
+// @Summary 获取收货地址
+// @Tags user
+// @Produce json
+// @Success 200 {array} models.Address
+// @Router /api/addresses [get]
 func GetAddresses(c *gin.Context) {
 	userIDVal, exists := c.Get("userId")
 	if !exists {
@@ -45,6 +50,13 @@ func GetAddresses(c *gin.Context) {
 }
 
 // SaveAddress 创建或修改收货地址
+// @Summary 保存收货地址
+// @Tags user
+// @Accept json
+// @Produce json
+// @Param body body AddressReq true "地址参数"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/addresses [post]
 func SaveAddress(c *gin.Context) {
 	userIDVal, exists := c.Get("userId")
 	if !exists {
@@ -121,6 +133,12 @@ func SaveAddress(c *gin.Context) {
 }
 
 // DeleteAddress 删除地址
+// @Summary 删除收货地址
+// @Tags user
+// @Produce json
+// @Param id path int true "地址 ID"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/addresses/{id} [delete]
 func DeleteAddress(c *gin.Context) {
 	userIDVal, exists := c.Get("userId")
 	if !exists {
@@ -155,6 +173,12 @@ func DeleteAddress(c *gin.Context) {
 }
 
 // SetDefaultAddress 设置默认地址
+// @Summary 设置默认地址
+// @Tags user
+// @Produce json
+// @Param id path int true "地址 ID"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/addresses/{id}/default [put]
 func SetDefaultAddress(c *gin.Context) {
 	userIDVal, exists := c.Get("userId")
 	if !exists {

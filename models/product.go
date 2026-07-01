@@ -8,44 +8,44 @@ import (
 
 // Category 商品分类
 type Category struct {
-	ID        uint       `gorm:"primaryKey;column:id;autoIncrement" json:"id"`
-	ParentID  uint       `gorm:"column:parent_id;default:0" json:"parentId"`
-	Name      string     `gorm:"column:name;type:varchar(64);not null" json:"name"`
-	SortOrder int        `gorm:"column:sort_order;default:0" json:"sortOrder"`
-	CreatedAt time.Time  `gorm:"column:created_at;default:CURRENT_TIMESTAMP" json:"createdAt"`
-	UpdatedAt time.Time  `gorm:"column:updated_at;default:CURRENT_TIMESTAMP" json:"updatedAt"`
+	ID        uint      `gorm:"primaryKey;column:id;autoIncrement" json:"id"`
+	ParentID  uint      `gorm:"column:parent_id;default:0" json:"parentId"`
+	Name      string    `gorm:"column:name;type:varchar(64);not null" json:"name"`
+	SortOrder int       `gorm:"column:sort_order;default:0" json:"sortOrder"`
+	CreatedAt time.Time `gorm:"column:created_at;default:CURRENT_TIMESTAMP" json:"createdAt"`
+	UpdatedAt time.Time `gorm:"column:updated_at;default:CURRENT_TIMESTAMP" json:"updatedAt"`
 }
 
 // Spu 标准产品单元
 type Spu struct {
-	ID          uint       `gorm:"primaryKey;column:id;autoIncrement" json:"id"`
-	CategoryID  uint       `gorm:"column:category_id;not null" json:"categoryId"`
-	Name        string     `gorm:"column:name;type:varchar(128);not null" json:"name"`
-	Subtitle    string     `gorm:"column:subtitle;type:varchar(256)" json:"subtitle"`
-	Description string     `gorm:"column:description;type:text" json:"description"`
-	MainImage   string     `gorm:"column:main_image;type:varchar(512)" json:"mainImage"`
-	Images      string     `gorm:"column:images;type:jsonb" json:"images"` // 存储图片JSON数组
-	DetailHTML  string     `gorm:"column:detail_html;type:text" json:"detailHtml"`
-	Status      int        `gorm:"column:status;default:1" json:"status"` // 1: 上架, 2: 下架
-	CreatedAt   time.Time  `gorm:"column:created_at;default:CURRENT_TIMESTAMP" json:"createdAt"`
-	UpdatedAt   time.Time  `gorm:"column:updated_at;default:CURRENT_TIMESTAMP" json:"updatedAt"`
-	Skus        []Sku      `gorm:"foreignKey:SpuID" json:"skus,omitempty"`
+	ID          uint      `gorm:"primaryKey;column:id;autoIncrement" json:"id"`
+	CategoryID  uint      `gorm:"column:category_id;not null" json:"categoryId"`
+	Name        string    `gorm:"column:name;type:varchar(128);not null" json:"name"`
+	Subtitle    string    `gorm:"column:subtitle;type:varchar(256)" json:"subtitle"`
+	Description string    `gorm:"column:description;type:text" json:"description"`
+	MainImage   string    `gorm:"column:main_image;type:varchar(512)" json:"mainImage"`
+	Images      string    `gorm:"column:images;type:jsonb" json:"images"` // 存储图片JSON数组
+	DetailHTML  string    `gorm:"column:detail_html;type:text" json:"detailHtml"`
+	Status      int       `gorm:"column:status;default:1" json:"status"` // 1: 上架, 2: 下架
+	CreatedAt   time.Time `gorm:"column:created_at;default:CURRENT_TIMESTAMP" json:"createdAt"`
+	UpdatedAt   time.Time `gorm:"column:updated_at;default:CURRENT_TIMESTAMP" json:"updatedAt"`
+	Skus        []Sku     `gorm:"foreignKey:SpuID" json:"skus,omitempty"`
 }
 
 // Sku 库存量单位
 type Sku struct {
-	ID          uint       `gorm:"primaryKey;column:id;autoIncrement" json:"id"`
-	SpuID       uint       `gorm:"column:spu_id;not null" json:"spuId"`
-	Title       string     `gorm:"column:title;type:varchar(256);not null" json:"title"`
-	Specs       string     `gorm:"column:specs;type:jsonb" json:"specs"` // 存储规格JSON属性
-	Price       int        `gorm:"column:price;not null" json:"price"`   // 单位：分
-	Stock       int        `gorm:"column:stock;default:0;not null" json:"stock"`
-	SalesVolume int        `gorm:"column:sales_volume;default:0" json:"salesVolume"`
-	CreatedAt   time.Time  `gorm:"column:created_at;default:CURRENT_TIMESTAMP" json:"createdAt"`
-	UpdatedAt   time.Time  `gorm:"column:updated_at;default:CURRENT_TIMESTAMP" json:"updatedAt"`
+	ID          uint      `gorm:"primaryKey;column:id;autoIncrement" json:"id"`
+	SpuID       uint      `gorm:"column:spu_id;not null" json:"spuId"`
+	Title       string    `gorm:"column:title;type:varchar(256);not null" json:"title"`
+	Specs       string    `gorm:"column:specs;type:jsonb" json:"specs"` // 存储规格JSON属性
+	Price       int       `gorm:"column:price;not null" json:"price"`   // 单位：分
+	Stock       int       `gorm:"column:stock;default:0;not null" json:"stock"`
+	SalesVolume int       `gorm:"column:sales_volume;default:0" json:"salesVolume"`
+	CreatedAt   time.Time `gorm:"column:created_at;default:CURRENT_TIMESTAMP" json:"createdAt"`
+	UpdatedAt   time.Time `gorm:"column:updated_at;default:CURRENT_TIMESTAMP" json:"updatedAt"`
 }
 
-// SeedProducts 初始化商品测试数据
+// SeedProducts 保留旧单体/测试调用兼容；微服务启动请使用 SeedServiceData 按服务名分库灌入。
 func SeedProducts(db *gorm.DB) error {
 	// 1. 确保 test_user 存在并获取其 ID
 	var testUser User
@@ -54,7 +54,7 @@ func SeedProducts(db *gorm.DB) error {
 		// 数据库中如果不存在 test_user，在此处创建
 		testUser = User{
 			Username:     "test_user",
-			PasswordHash: "$2a$10$tZ276V04s1J3/gO.wIu88.K7e/701h6.6Xj/N3tB5d0QZ3r5lM5Hq", // 123456
+			PasswordHash: SeedTestUserPasswordHash,
 			Email:        "test@example.com",
 		}
 		if err := db.Create(&testUser).Error; err != nil {

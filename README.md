@@ -36,8 +36,8 @@
 ### 3. 交易闭环与 Outbox 事件总线
 
 * **设计实现：** 普通订单采用“价格试算 -> 优惠券锁定 -> 库存预占 -> 支付单 -> mock 回调 -> 库存确认 -> 售后退款”的统一状态机。
-* **核心机制：** 订单、支付、售后在本地事务内写入 `outbox_events`，调度服务将待发送事件发布到 Redis Stream `goshop:events`。
-* **务实价值：** 单体内保持强事务一致性，同时为后续替换为 NATS JetStream/RabbitMQ 和独立数据库拆分保留稳定事件边界。
+* **核心机制：** 订单、支付、售后在本地事务内写入 `outbox_events`，调度服务将待发送事件发布到 NATS JetStream `goshop.events.<aggregate>.<event>` 主题。
+* **务实价值：** 单体内保持强事务一致性，微服务形态下通过 NATS JetStream 与 `inbox_events` 幂等消费完成跨库最终一致性对账。
 
 ### 4. 基于 PostgreSQL 的高性能分层商品模型
 
@@ -64,7 +64,7 @@
 * **后端核心:** Go + Gin (轻量极速的 Web 框架，生产环境路由性能卓越)
 * **后台前端:** Vue 3 + Pinia + Vue Router + Vanilla CSS (严格遵循 Anthropic 暖乳白极简设计规范，实现多页面商品选购、购物车及延迟队列秒杀支付链路，深度集成实时技术引擎监控看板)
 * **持久层:** PostgreSQL 14+ + GORM (利用 PG 强大的关系型事务特性存储 SPU/SKU 及订单信息)
-* **缓存与异步组件:** Valkey 7+ (Redis 社区正统分支，负责高并发 Lua 原子扣减库存、异步延迟队列与 Redis Stream 事件发布)
+* **缓存与异步组件:** Valkey 7+ (Redis 社区正统分支，负责高并发 Lua 原子扣减库存与异步延迟队列) + NATS JetStream (负责跨服务事件发布与消费)
 * **API 规范:** Swagger (利用 `swaggo/swag` 自动化生成可交互的 RESTful API 文档，本地完美渲染)
 
 ---
@@ -187,13 +187,13 @@ cp config.example.yaml config.yaml
 
 ---
 
-## 🛠️ 剩余硬拆分工作 (Remaining Hard-Split Work)
+## 🛠️ 微服务生产化后续工作 (Production Hardening Work)
 
-当前微服务为**过渡形态**（共享同一个数据库 Schema、相同的 Valkey 实例、底层 Models 和 Handler 包）。若要升级为完全解耦的生产级微服务，仍需完成以下硬拆分工作（具体设计路线详见 [物理微服务硬拆分与消息队列演进方案](file:///home/lzzz/MyProjects/GoShop/docs/hard_split_and_mq_plan.md)）：
+当前微服务形态已经完成独立进程、服务专属数据库配置、局部表迁移、HTTP-RPC 内部调用、NATS JetStream Outbox/Inbox 消息对账等硬拆分基础能力。后续若要进入更接近生产的长期运行形态，仍建议继续补齐以下工作：
 
-1. **数据库独立与表拆分**：将各微服务专有表移动到独立的 PostgreSQL Schema 或物理数据库中，为每个微服务配置只拥有自身库/表最小权限的数据库账号。
-2. **跨服务通信改造**：订单服务等目前跨表查询（如查询用户、商品、库存快照）需改写为通过 gRPC / HTTP 接口向相应服务发出请求。
-3. **消息队列升级**：将目前的 Redis Stream 事件总线（Outbox 发布器）升级为 NATS JetStream 或 RabbitMQ 等高吞吐专业消息中间件，并在各消费端补齐 Inbox 幂等消费者。
+1. **数据库权限最小化**：为每个服务配置独立账号和只读/读写权限边界，并补充迁移审计。
+2. **跨服务契约治理**：将 `/api/internal/*` HTTP-RPC 契约沉淀为版本化接口文档或 OpenAPI 子文档，并补充兼容性测试。
+3. **消息可靠性运营化**：为 NATS JetStream 消费延迟、重试、死信和 Inbox 堆积增加监控告警。
 4. **商家管理后台与支付系统重构**：剥离出独立的 Admin 前端，接入生产级第三方支付渠道并补充每日财务对账任务。
 
 ---

@@ -15,7 +15,1946 @@ const docTemplate = `{
     },
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
-    "paths": {}
+    "paths": {
+        "/api/addresses": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "user"
+                ],
+                "summary": "获取收货地址",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/models.Address"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "user"
+                ],
+                "summary": "保存收货地址",
+                "parameters": [
+                    {
+                        "description": "地址参数",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.AddressReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/addresses/{id}": {
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "user"
+                ],
+                "summary": "删除收货地址",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "地址 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/addresses/{id}/default": {
+            "put": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "user"
+                ],
+                "summary": "设置默认地址",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "地址 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/admin/orders/{id}/refund/audit": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "aftersale"
+                ],
+                "summary": "审核售后退款",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "订单 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "审核参数",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.AuditRefundReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/login": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "用户登录",
+                "parameters": [
+                    {
+                        "description": "登录参数",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.LoginReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/refresh": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "刷新 access token",
+                "parameters": [
+                    {
+                        "description": "刷新参数",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.RefreshReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/register": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "用户注册",
+                "parameters": [
+                    {
+                        "description": "注册参数",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.RegisterReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/sign-key": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "获取请求签名 key",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/cart": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "cart"
+                ],
+                "summary": "获取购物车",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "cart"
+                ],
+                "summary": "添加或更新购物车",
+                "parameters": [
+                    {
+                        "description": "购物车项",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.CartSaveReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/cart/sync": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "cart"
+                ],
+                "summary": "同步购物车",
+                "parameters": [
+                    {
+                        "description": "同步项",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.CartSyncReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/cart/{skuId}": {
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "cart"
+                ],
+                "summary": "删除购物车项",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "SKU ID",
+                        "name": "skuId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/categories": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "product"
+                ],
+                "summary": "获取商品分类",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/models.Category"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/checkout/preview": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "order"
+                ],
+                "summary": "结算试算",
+                "parameters": [
+                    {
+                        "description": "试算参数",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/checkout.PreviewRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.Preview"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/coupons": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "promotion"
+                ],
+                "summary": "获取可领取优惠券",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/models.Coupon"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/orders": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "order"
+                ],
+                "summary": "查询订单列表",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "订单状态",
+                        "name": "status",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/models.Order"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "order"
+                ],
+                "summary": "创建订单",
+                "parameters": [
+                    {
+                        "description": "下单参数",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.CreateOrderReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/orders/{id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "order"
+                ],
+                "summary": "查询订单详情",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "订单 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/order.Detail"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/orders/{id}/refund": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "aftersale"
+                ],
+                "summary": "申请售后退款",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "订单 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "退款参数",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.RefundReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/pay": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "payment"
+                ],
+                "summary": "模拟支付订单",
+                "parameters": [
+                    {
+                        "description": "支付参数",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.PayReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/payments": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "payment"
+                ],
+                "summary": "创建支付单",
+                "parameters": [
+                    {
+                        "description": "支付单参数",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.CreatePaymentReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/payments/callback/mock": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "payment"
+                ],
+                "summary": "模拟支付回调",
+                "parameters": [
+                    {
+                        "description": "回调参数",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.MockPaymentCallbackReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/payments/{id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "payment"
+                ],
+                "summary": "查询支付单",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "支付单 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.PaymentOrder"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/products": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "product"
+                ],
+                "summary": "分页查询商品",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "分类 ID",
+                        "name": "categoryId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "搜索关键词",
+                        "name": "keyword",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "pageSize",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/products/{id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "product"
+                ],
+                "summary": "查询商品详情",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "SPU ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.Spu"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/seckill": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "order"
+                ],
+                "summary": "秒杀下单",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/user-coupons": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "promotion"
+                ],
+                "summary": "获取我的优惠券",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/models.UserCoupon"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/user-coupons/receive": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "promotion"
+                ],
+                "summary": "领取优惠券",
+                "parameters": [
+                    {
+                        "description": "领取参数",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ReceiveCouponReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "checkout.CouponCandidate": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean"
+                },
+                "discountAmount": {
+                    "type": "integer"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "userCouponId": {
+                    "type": "integer"
+                }
+            }
+        },
+        "checkout.ItemPreview": {
+            "type": "object",
+            "properties": {
+                "itemDiscountAmount": {
+                    "type": "integer"
+                },
+                "originAmount": {
+                    "type": "integer"
+                },
+                "payableAmount": {
+                    "type": "integer"
+                },
+                "price": {
+                    "type": "integer"
+                },
+                "quantity": {
+                    "type": "integer"
+                },
+                "skuId": {
+                    "type": "integer"
+                }
+            }
+        },
+        "checkout.ItemReq": {
+            "type": "object",
+            "required": [
+                "quantity",
+                "skuId"
+            ],
+            "properties": {
+                "quantity": {
+                    "type": "integer"
+                },
+                "skuId": {
+                    "type": "integer"
+                }
+            }
+        },
+        "checkout.Preview": {
+            "type": "object",
+            "properties": {
+                "couponCandidates": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/checkout.CouponCandidate"
+                    }
+                },
+                "goodsDiscountAmount": {
+                    "type": "integer"
+                },
+                "goodsOriginAmount": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/checkout.ItemPreview"
+                    }
+                },
+                "payableAmount": {
+                    "type": "integer"
+                },
+                "selectedUserCouponId": {
+                    "type": "integer"
+                },
+                "shippingFee": {
+                    "type": "integer"
+                },
+                "taxFee": {
+                    "type": "integer"
+                }
+            }
+        },
+        "checkout.PreviewRequest": {
+            "type": "object",
+            "required": [
+                "addressId",
+                "items"
+            ],
+            "properties": {
+                "addressId": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/checkout.ItemReq"
+                    }
+                },
+                "userCouponId": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.AddressReq": {
+            "type": "object",
+            "required": [
+                "city",
+                "detailAddress",
+                "district",
+                "province",
+                "receiverName",
+                "receiverPhone"
+            ],
+            "properties": {
+                "city": {
+                    "type": "string"
+                },
+                "detailAddress": {
+                    "type": "string"
+                },
+                "district": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "isDefault": {
+                    "type": "boolean"
+                },
+                "province": {
+                    "type": "string"
+                },
+                "receiverName": {
+                    "type": "string"
+                },
+                "receiverPhone": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.AuditRefundReq": {
+            "type": "object",
+            "required": [
+                "action"
+            ],
+            "properties": {
+                "action": {
+                    "description": "\"approve\" 或 \"reject\"",
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.CartSaveReq": {
+            "type": "object",
+            "required": [
+                "quantity",
+                "skuId"
+            ],
+            "properties": {
+                "quantity": {
+                    "type": "integer"
+                },
+                "skuId": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.CartSyncReq": {
+            "type": "object",
+            "required": [
+                "items"
+            ],
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SyncItem"
+                    }
+                }
+            }
+        },
+        "handlers.CreateOrderReq": {
+            "type": "object",
+            "required": [
+                "addressId",
+                "items"
+            ],
+            "properties": {
+                "addressId": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.OrderItemReq"
+                    }
+                },
+                "userCouponId": {
+                    "description": "可选",
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.CreatePaymentReq": {
+            "type": "object",
+            "required": [
+                "orderId"
+            ],
+            "properties": {
+                "orderId": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.LoginReq": {
+            "type": "object",
+            "required": [
+                "password",
+                "username"
+            ],
+            "properties": {
+                "password": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.MockPaymentCallbackReq": {
+            "type": "object",
+            "required": [
+                "amount"
+            ],
+            "properties": {
+                "amount": {
+                    "type": "integer"
+                },
+                "channelTradeNo": {
+                    "type": "string"
+                },
+                "eventId": {
+                    "type": "string"
+                },
+                "orderId": {
+                    "type": "string"
+                },
+                "paymentOrderId": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.OrderItemReq": {
+            "type": "object",
+            "required": [
+                "quantity",
+                "skuId"
+            ],
+            "properties": {
+                "quantity": {
+                    "type": "integer"
+                },
+                "skuId": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.PayReq": {
+            "type": "object",
+            "required": [
+                "orderId"
+            ],
+            "properties": {
+                "orderId": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.ReceiveCouponReq": {
+            "type": "object",
+            "required": [
+                "couponId"
+            ],
+            "properties": {
+                "couponId": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.RefreshReq": {
+            "type": "object",
+            "required": [
+                "refreshToken"
+            ],
+            "properties": {
+                "refreshToken": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.RefundItemReq": {
+            "type": "object",
+            "required": [
+                "orderItemId",
+                "quantity"
+            ],
+            "properties": {
+                "orderItemId": {
+                    "type": "integer"
+                },
+                "quantity": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.RefundReq": {
+            "type": "object",
+            "required": [
+                "refundReason"
+            ],
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.RefundItemReq"
+                    }
+                },
+                "refundProof": {
+                    "type": "string"
+                },
+                "refundReason": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.RegisterReq": {
+            "type": "object",
+            "required": [
+                "password",
+                "username"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.SyncItem": {
+            "type": "object",
+            "required": [
+                "quantity",
+                "skuId"
+            ],
+            "properties": {
+                "quantity": {
+                    "type": "integer"
+                },
+                "skuId": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.Address": {
+            "type": "object",
+            "properties": {
+                "city": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "detailAddress": {
+                    "type": "string"
+                },
+                "district": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "isDefault": {
+                    "type": "boolean"
+                },
+                "province": {
+                    "type": "string"
+                },
+                "receiverName": {
+                    "type": "string"
+                },
+                "receiverPhone": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                },
+                "userId": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.AfterSaleItem": {
+            "type": "object",
+            "properties": {
+                "afterSaleId": {
+                    "type": "string"
+                },
+                "applyAmount": {
+                    "type": "integer"
+                },
+                "approvedAmount": {
+                    "type": "integer"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "maxRefundableAmount": {
+                    "type": "integer"
+                },
+                "orderItemId": {
+                    "type": "integer"
+                },
+                "quantity": {
+                    "type": "integer"
+                },
+                "skuId": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.AfterSaleOrder": {
+            "type": "object",
+            "properties": {
+                "applyAmount": {
+                    "type": "integer"
+                },
+                "approvedAmount": {
+                    "type": "integer"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.AfterSaleItem"
+                    }
+                },
+                "orderId": {
+                    "type": "string"
+                },
+                "proofUrls": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "refundId": {
+                    "type": "string"
+                },
+                "returnTrackingNo": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "integer"
+                },
+                "type": {
+                    "type": "integer"
+                },
+                "updatedAt": {
+                    "type": "string"
+                },
+                "userId": {
+                    "type": "integer"
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.Category": {
+            "type": "object",
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "parentId": {
+                    "type": "integer"
+                },
+                "sortOrder": {
+                    "type": "integer"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.Coupon": {
+            "type": "object",
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "endTime": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "minAmount": {
+                    "description": "最低消费门槛（分）",
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "startTime": {
+                    "type": "string"
+                },
+                "type": {
+                    "description": "1: 满减, 2: 折扣, 3: 无门槛",
+                    "type": "integer"
+                },
+                "updatedAt": {
+                    "type": "string"
+                },
+                "value": {
+                    "description": "满减金额（分）或 折扣百分比（如90代表9折）",
+                    "type": "integer"
+                }
+            }
+        },
+        "models.InventoryReservation": {
+            "type": "object",
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "expireAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "orderId": {
+                    "type": "string"
+                },
+                "quantity": {
+                    "type": "integer"
+                },
+                "skuId": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "integer"
+                },
+                "updatedAt": {
+                    "type": "string"
+                },
+                "userId": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.Order": {
+            "type": "object",
+            "properties": {
+                "afterSaleStatus": {
+                    "type": "integer"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "discountAmount": {
+                    "description": "兼容旧前端：商品优惠总额（分）",
+                    "type": "integer"
+                },
+                "goodsDiscountAmount": {
+                    "type": "integer"
+                },
+                "goodsOriginAmount": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "items": {
+                    "description": "订单子项",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.OrderItem"
+                    }
+                },
+                "payExpireAt": {
+                    "type": "string"
+                },
+                "payStatus": {
+                    "type": "integer"
+                },
+                "payableAmount": {
+                    "type": "integer"
+                },
+                "receiverAddr": {
+                    "description": "收货地址快照",
+                    "type": "string"
+                },
+                "receiverName": {
+                    "description": "收货人姓名快照",
+                    "type": "string"
+                },
+                "receiverPhone": {
+                    "description": "收货人手机快照",
+                    "type": "string"
+                },
+                "refundProof": {
+                    "type": "string"
+                },
+                "refundReason": {
+                    "type": "string"
+                },
+                "shippingDiscountAmount": {
+                    "type": "integer"
+                },
+                "shippingFee": {
+                    "description": "运费（分）",
+                    "type": "integer"
+                },
+                "status": {
+                    "description": "10: 待支付, 20: 已支付, 60: 已取消, 110: 申请退款中, 120: 已退款, 130: 退款被拒绝",
+                    "type": "integer"
+                },
+                "taxDiscountAmount": {
+                    "type": "integer"
+                },
+                "taxFee": {
+                    "description": "税费（分）",
+                    "type": "integer"
+                },
+                "totalAmount": {
+                    "description": "兼容旧前端：应付总额（分）",
+                    "type": "integer"
+                },
+                "updatedAt": {
+                    "type": "string"
+                },
+                "userCouponId": {
+                    "type": "integer"
+                },
+                "userId": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.OrderItem": {
+            "type": "object",
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "itemDiscountAmount": {
+                    "type": "integer"
+                },
+                "merchantId": {
+                    "type": "integer"
+                },
+                "orderId": {
+                    "type": "string"
+                },
+                "originAmount": {
+                    "type": "integer"
+                },
+                "payableAmount": {
+                    "type": "integer"
+                },
+                "price": {
+                    "description": "下单单价（分）",
+                    "type": "integer"
+                },
+                "promotionSnapshot": {
+                    "type": "string"
+                },
+                "quantity": {
+                    "type": "integer"
+                },
+                "refundedAmount": {
+                    "type": "integer"
+                },
+                "sku": {
+                    "description": "关联 SKU",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.Sku"
+                        }
+                    ]
+                },
+                "skuId": {
+                    "type": "integer"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.OrderStateLog": {
+            "type": "object",
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "event": {
+                    "type": "string"
+                },
+                "fromStatus": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "operatorId": {
+                    "type": "integer"
+                },
+                "operatorType": {
+                    "type": "integer"
+                },
+                "orderId": {
+                    "type": "string"
+                },
+                "remark": {
+                    "type": "string"
+                },
+                "toStatus": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.PaymentOrder": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "integer"
+                },
+                "channel": {
+                    "type": "integer"
+                },
+                "channelTradeNo": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "idempotencyKey": {
+                    "type": "string"
+                },
+                "orderId": {
+                    "type": "string"
+                },
+                "paidAt": {
+                    "type": "string"
+                },
+                "payUrl": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "integer"
+                },
+                "updatedAt": {
+                    "type": "string"
+                },
+                "userId": {
+                    "type": "integer"
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.RefundOrder": {
+            "type": "object",
+            "properties": {
+                "afterSaleId": {
+                    "type": "string"
+                },
+                "amount": {
+                    "type": "integer"
+                },
+                "channelRefundNo": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "idempotencyKey": {
+                    "type": "string"
+                },
+                "orderId": {
+                    "type": "string"
+                },
+                "paymentOrderId": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "refundedAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "integer"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.Sku": {
+            "type": "object",
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "price": {
+                    "description": "单位：分",
+                    "type": "integer"
+                },
+                "salesVolume": {
+                    "type": "integer"
+                },
+                "specs": {
+                    "description": "存储规格JSON属性",
+                    "type": "string"
+                },
+                "spuId": {
+                    "type": "integer"
+                },
+                "stock": {
+                    "type": "integer"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.Spu": {
+            "type": "object",
+            "properties": {
+                "categoryId": {
+                    "type": "integer"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "detailHtml": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "images": {
+                    "description": "存储图片JSON数组",
+                    "type": "string"
+                },
+                "mainImage": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "skus": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.Sku"
+                    }
+                },
+                "status": {
+                    "description": "1: 上架, 2: 下架",
+                    "type": "integer"
+                },
+                "subtitle": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.UserCoupon": {
+            "type": "object",
+            "properties": {
+                "coupon": {
+                    "description": "关联卡券基本信息",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.Coupon"
+                        }
+                    ]
+                },
+                "couponId": {
+                    "type": "integer"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "lockedAt": {
+                    "type": "string"
+                },
+                "lockedOrderId": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "0: 可用, 1: 已使用, 2: 已过期, 3: 已锁定",
+                    "type": "integer"
+                },
+                "updatedAt": {
+                    "type": "string"
+                },
+                "usedAt": {
+                    "type": "string"
+                },
+                "userId": {
+                    "type": "integer"
+                }
+            }
+        },
+        "order.Detail": {
+            "type": "object",
+            "properties": {
+                "afterSales": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.AfterSaleOrder"
+                    }
+                },
+                "order": {
+                    "$ref": "#/definitions/models.Order"
+                },
+                "paymentOrder": {
+                    "$ref": "#/definitions/models.PaymentOrder"
+                },
+                "refundOrders": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.RefundOrder"
+                    }
+                },
+                "reservations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.InventoryReservation"
+                    }
+                },
+                "stateLogs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.OrderStateLog"
+                    }
+                }
+            }
+        }
+    }
 }`
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it

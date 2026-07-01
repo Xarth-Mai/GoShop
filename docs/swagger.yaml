@@ -1,9 +1,1283 @@
 basePath: /
+definitions:
+  checkout.CouponCandidate:
+    properties:
+      available:
+        type: boolean
+      discountAmount:
+        type: integer
+      reason:
+        type: string
+      userCouponId:
+        type: integer
+    type: object
+  checkout.ItemPreview:
+    properties:
+      itemDiscountAmount:
+        type: integer
+      originAmount:
+        type: integer
+      payableAmount:
+        type: integer
+      price:
+        type: integer
+      quantity:
+        type: integer
+      skuId:
+        type: integer
+    type: object
+  checkout.ItemReq:
+    properties:
+      quantity:
+        type: integer
+      skuId:
+        type: integer
+    required:
+    - quantity
+    - skuId
+    type: object
+  checkout.Preview:
+    properties:
+      couponCandidates:
+        items:
+          $ref: '#/definitions/checkout.CouponCandidate'
+        type: array
+      goodsDiscountAmount:
+        type: integer
+      goodsOriginAmount:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/checkout.ItemPreview'
+        type: array
+      payableAmount:
+        type: integer
+      selectedUserCouponId:
+        type: integer
+      shippingFee:
+        type: integer
+      taxFee:
+        type: integer
+    type: object
+  checkout.PreviewRequest:
+    properties:
+      addressId:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/checkout.ItemReq'
+        type: array
+      userCouponId:
+        type: integer
+    required:
+    - addressId
+    - items
+    type: object
+  handlers.AddressReq:
+    properties:
+      city:
+        type: string
+      detailAddress:
+        type: string
+      district:
+        type: string
+      id:
+        type: integer
+      isDefault:
+        type: boolean
+      province:
+        type: string
+      receiverName:
+        type: string
+      receiverPhone:
+        type: string
+    required:
+    - city
+    - detailAddress
+    - district
+    - province
+    - receiverName
+    - receiverPhone
+    type: object
+  handlers.AuditRefundReq:
+    properties:
+      action:
+        description: '"approve" 或 "reject"'
+        type: string
+    required:
+    - action
+    type: object
+  handlers.CartSaveReq:
+    properties:
+      quantity:
+        type: integer
+      skuId:
+        type: integer
+    required:
+    - quantity
+    - skuId
+    type: object
+  handlers.CartSyncReq:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/handlers.SyncItem'
+        type: array
+    required:
+    - items
+    type: object
+  handlers.CreateOrderReq:
+    properties:
+      addressId:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/handlers.OrderItemReq'
+        type: array
+      userCouponId:
+        description: 可选
+        type: integer
+    required:
+    - addressId
+    - items
+    type: object
+  handlers.CreatePaymentReq:
+    properties:
+      orderId:
+        type: string
+    required:
+    - orderId
+    type: object
+  handlers.LoginReq:
+    properties:
+      password:
+        type: string
+      username:
+        type: string
+    required:
+    - password
+    - username
+    type: object
+  handlers.MockPaymentCallbackReq:
+    properties:
+      amount:
+        type: integer
+      channelTradeNo:
+        type: string
+      eventId:
+        type: string
+      orderId:
+        type: string
+      paymentOrderId:
+        type: string
+      status:
+        type: string
+    required:
+    - amount
+    type: object
+  handlers.OrderItemReq:
+    properties:
+      quantity:
+        type: integer
+      skuId:
+        type: integer
+    required:
+    - quantity
+    - skuId
+    type: object
+  handlers.PayReq:
+    properties:
+      orderId:
+        type: string
+    required:
+    - orderId
+    type: object
+  handlers.ReceiveCouponReq:
+    properties:
+      couponId:
+        type: integer
+    required:
+    - couponId
+    type: object
+  handlers.RefreshReq:
+    properties:
+      refreshToken:
+        type: string
+    required:
+    - refreshToken
+    type: object
+  handlers.RefundItemReq:
+    properties:
+      orderItemId:
+        type: integer
+      quantity:
+        type: integer
+    required:
+    - orderItemId
+    - quantity
+    type: object
+  handlers.RefundReq:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/handlers.RefundItemReq'
+        type: array
+      refundProof:
+        type: string
+      refundReason:
+        type: string
+      type:
+        type: integer
+    required:
+    - refundReason
+    type: object
+  handlers.RegisterReq:
+    properties:
+      email:
+        type: string
+      password:
+        type: string
+      username:
+        type: string
+    required:
+    - password
+    - username
+    type: object
+  handlers.SyncItem:
+    properties:
+      quantity:
+        type: integer
+      skuId:
+        type: integer
+    required:
+    - quantity
+    - skuId
+    type: object
+  models.Address:
+    properties:
+      city:
+        type: string
+      createdAt:
+        type: string
+      detailAddress:
+        type: string
+      district:
+        type: string
+      id:
+        type: integer
+      isDefault:
+        type: boolean
+      province:
+        type: string
+      receiverName:
+        type: string
+      receiverPhone:
+        type: string
+      updatedAt:
+        type: string
+      userId:
+        type: integer
+    type: object
+  models.AfterSaleItem:
+    properties:
+      afterSaleId:
+        type: string
+      applyAmount:
+        type: integer
+      approvedAmount:
+        type: integer
+      createdAt:
+        type: string
+      id:
+        type: integer
+      maxRefundableAmount:
+        type: integer
+      orderItemId:
+        type: integer
+      quantity:
+        type: integer
+      skuId:
+        type: integer
+    type: object
+  models.AfterSaleOrder:
+    properties:
+      applyAmount:
+        type: integer
+      approvedAmount:
+        type: integer
+      createdAt:
+        type: string
+      id:
+        type: string
+      items:
+        items:
+          $ref: '#/definitions/models.AfterSaleItem'
+        type: array
+      orderId:
+        type: string
+      proofUrls:
+        type: string
+      reason:
+        type: string
+      refundId:
+        type: string
+      returnTrackingNo:
+        type: string
+      status:
+        type: integer
+      type:
+        type: integer
+      updatedAt:
+        type: string
+      userId:
+        type: integer
+      version:
+        type: integer
+    type: object
+  models.Category:
+    properties:
+      createdAt:
+        type: string
+      id:
+        type: integer
+      name:
+        type: string
+      parentId:
+        type: integer
+      sortOrder:
+        type: integer
+      updatedAt:
+        type: string
+    type: object
+  models.Coupon:
+    properties:
+      createdAt:
+        type: string
+      endTime:
+        type: string
+      id:
+        type: integer
+      minAmount:
+        description: 最低消费门槛（分）
+        type: integer
+      name:
+        type: string
+      startTime:
+        type: string
+      type:
+        description: '1: 满减, 2: 折扣, 3: 无门槛'
+        type: integer
+      updatedAt:
+        type: string
+      value:
+        description: 满减金额（分）或 折扣百分比（如90代表9折）
+        type: integer
+    type: object
+  models.InventoryReservation:
+    properties:
+      createdAt:
+        type: string
+      expireAt:
+        type: string
+      id:
+        type: string
+      orderId:
+        type: string
+      quantity:
+        type: integer
+      skuId:
+        type: integer
+      status:
+        type: integer
+      updatedAt:
+        type: string
+      userId:
+        type: integer
+    type: object
+  models.Order:
+    properties:
+      afterSaleStatus:
+        type: integer
+      createdAt:
+        type: string
+      discountAmount:
+        description: 兼容旧前端：商品优惠总额（分）
+        type: integer
+      goodsDiscountAmount:
+        type: integer
+      goodsOriginAmount:
+        type: integer
+      id:
+        type: string
+      items:
+        description: 订单子项
+        items:
+          $ref: '#/definitions/models.OrderItem'
+        type: array
+      payExpireAt:
+        type: string
+      payStatus:
+        type: integer
+      payableAmount:
+        type: integer
+      receiverAddr:
+        description: 收货地址快照
+        type: string
+      receiverName:
+        description: 收货人姓名快照
+        type: string
+      receiverPhone:
+        description: 收货人手机快照
+        type: string
+      refundProof:
+        type: string
+      refundReason:
+        type: string
+      shippingDiscountAmount:
+        type: integer
+      shippingFee:
+        description: 运费（分）
+        type: integer
+      status:
+        description: '10: 待支付, 20: 已支付, 60: 已取消, 110: 申请退款中, 120: 已退款, 130: 退款被拒绝'
+        type: integer
+      taxDiscountAmount:
+        type: integer
+      taxFee:
+        description: 税费（分）
+        type: integer
+      totalAmount:
+        description: 兼容旧前端：应付总额（分）
+        type: integer
+      updatedAt:
+        type: string
+      userCouponId:
+        type: integer
+      userId:
+        type: integer
+    type: object
+  models.OrderItem:
+    properties:
+      createdAt:
+        type: string
+      id:
+        type: integer
+      itemDiscountAmount:
+        type: integer
+      merchantId:
+        type: integer
+      orderId:
+        type: string
+      originAmount:
+        type: integer
+      payableAmount:
+        type: integer
+      price:
+        description: 下单单价（分）
+        type: integer
+      promotionSnapshot:
+        type: string
+      quantity:
+        type: integer
+      refundedAmount:
+        type: integer
+      sku:
+        allOf:
+        - $ref: '#/definitions/models.Sku'
+        description: 关联 SKU
+      skuId:
+        type: integer
+      updatedAt:
+        type: string
+    type: object
+  models.OrderStateLog:
+    properties:
+      createdAt:
+        type: string
+      event:
+        type: string
+      fromStatus:
+        type: integer
+      id:
+        type: integer
+      operatorId:
+        type: integer
+      operatorType:
+        type: integer
+      orderId:
+        type: string
+      remark:
+        type: string
+      toStatus:
+        type: integer
+    type: object
+  models.PaymentOrder:
+    properties:
+      amount:
+        type: integer
+      channel:
+        type: integer
+      channelTradeNo:
+        type: string
+      createdAt:
+        type: string
+      currency:
+        type: string
+      id:
+        type: string
+      idempotencyKey:
+        type: string
+      orderId:
+        type: string
+      paidAt:
+        type: string
+      payUrl:
+        type: string
+      status:
+        type: integer
+      updatedAt:
+        type: string
+      userId:
+        type: integer
+      version:
+        type: integer
+    type: object
+  models.RefundOrder:
+    properties:
+      afterSaleId:
+        type: string
+      amount:
+        type: integer
+      channelRefundNo:
+        type: string
+      createdAt:
+        type: string
+      id:
+        type: string
+      idempotencyKey:
+        type: string
+      orderId:
+        type: string
+      paymentOrderId:
+        type: string
+      reason:
+        type: string
+      refundedAt:
+        type: string
+      status:
+        type: integer
+      updatedAt:
+        type: string
+    type: object
+  models.Sku:
+    properties:
+      createdAt:
+        type: string
+      id:
+        type: integer
+      price:
+        description: 单位：分
+        type: integer
+      salesVolume:
+        type: integer
+      specs:
+        description: 存储规格JSON属性
+        type: string
+      spuId:
+        type: integer
+      stock:
+        type: integer
+      title:
+        type: string
+      updatedAt:
+        type: string
+    type: object
+  models.Spu:
+    properties:
+      categoryId:
+        type: integer
+      createdAt:
+        type: string
+      description:
+        type: string
+      detailHtml:
+        type: string
+      id:
+        type: integer
+      images:
+        description: 存储图片JSON数组
+        type: string
+      mainImage:
+        type: string
+      name:
+        type: string
+      skus:
+        items:
+          $ref: '#/definitions/models.Sku'
+        type: array
+      status:
+        description: '1: 上架, 2: 下架'
+        type: integer
+      subtitle:
+        type: string
+      updatedAt:
+        type: string
+    type: object
+  models.UserCoupon:
+    properties:
+      coupon:
+        allOf:
+        - $ref: '#/definitions/models.Coupon'
+        description: 关联卡券基本信息
+      couponId:
+        type: integer
+      createdAt:
+        type: string
+      id:
+        type: integer
+      lockedAt:
+        type: string
+      lockedOrderId:
+        type: string
+      status:
+        description: '0: 可用, 1: 已使用, 2: 已过期, 3: 已锁定'
+        type: integer
+      updatedAt:
+        type: string
+      usedAt:
+        type: string
+      userId:
+        type: integer
+    type: object
+  order.Detail:
+    properties:
+      afterSales:
+        items:
+          $ref: '#/definitions/models.AfterSaleOrder'
+        type: array
+      order:
+        $ref: '#/definitions/models.Order'
+      paymentOrder:
+        $ref: '#/definitions/models.PaymentOrder'
+      refundOrders:
+        items:
+          $ref: '#/definitions/models.RefundOrder'
+        type: array
+      reservations:
+        items:
+          $ref: '#/definitions/models.InventoryReservation'
+        type: array
+      stateLogs:
+        items:
+          $ref: '#/definitions/models.OrderStateLog'
+        type: array
+    type: object
 host: localhost:3233
 info:
   contact: {}
   description: 一个基于 Go 语言构建的轻量级、高性能通用电商后端系统。
   title: GoShop API
   version: "1.0"
-paths: {}
+paths:
+  /api/addresses:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.Address'
+            type: array
+      summary: 获取收货地址
+      tags:
+      - user
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 地址参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.AddressReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 保存收货地址
+      tags:
+      - user
+  /api/addresses/{id}:
+    delete:
+      parameters:
+      - description: 地址 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 删除收货地址
+      tags:
+      - user
+  /api/addresses/{id}/default:
+    put:
+      parameters:
+      - description: 地址 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 设置默认地址
+      tags:
+      - user
+  /api/admin/orders/{id}/refund/audit:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 订单 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 审核参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.AuditRefundReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 审核售后退款
+      tags:
+      - aftersale
+  /api/auth/login:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 登录参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.LoginReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 用户登录
+      tags:
+      - auth
+  /api/auth/refresh:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 刷新参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.RefreshReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 刷新 access token
+      tags:
+      - auth
+  /api/auth/register:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 注册参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.RegisterReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 用户注册
+      tags:
+      - auth
+  /api/auth/sign-key:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 获取请求签名 key
+      tags:
+      - auth
+  /api/cart:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+      summary: 获取购物车
+      tags:
+      - cart
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 购物车项
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.CartSaveReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 添加或更新购物车
+      tags:
+      - cart
+  /api/cart/{skuId}:
+    delete:
+      parameters:
+      - description: SKU ID
+        in: path
+        name: skuId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 删除购物车项
+      tags:
+      - cart
+  /api/cart/sync:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 同步项
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.CartSyncReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 同步购物车
+      tags:
+      - cart
+  /api/categories:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.Category'
+            type: array
+      summary: 获取商品分类
+      tags:
+      - product
+  /api/checkout/preview:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 试算参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/checkout.PreviewRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/checkout.Preview'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 结算试算
+      tags:
+      - order
+  /api/coupons:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.Coupon'
+            type: array
+      summary: 获取可领取优惠券
+      tags:
+      - promotion
+  /api/orders:
+    get:
+      parameters:
+      - description: 订单状态
+        in: query
+        name: status
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.Order'
+            type: array
+      summary: 查询订单列表
+      tags:
+      - order
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 下单参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.CreateOrderReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 创建订单
+      tags:
+      - order
+  /api/orders/{id}:
+    get:
+      parameters:
+      - description: 订单 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/order.Detail'
+      summary: 查询订单详情
+      tags:
+      - order
+  /api/orders/{id}/refund:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 订单 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 退款参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.RefundReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 申请售后退款
+      tags:
+      - aftersale
+  /api/pay:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 支付参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.PayReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 模拟支付订单
+      tags:
+      - payment
+  /api/payments:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 支付单参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.CreatePaymentReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 创建支付单
+      tags:
+      - payment
+  /api/payments/{id}:
+    get:
+      parameters:
+      - description: 支付单 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.PaymentOrder'
+      summary: 查询支付单
+      tags:
+      - payment
+  /api/payments/callback/mock:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 回调参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.MockPaymentCallbackReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 模拟支付回调
+      tags:
+      - payment
+  /api/products:
+    get:
+      parameters:
+      - description: 分类 ID
+        in: query
+        name: categoryId
+        type: integer
+      - description: 搜索关键词
+        in: query
+        name: keyword
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: pageSize
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 分页查询商品
+      tags:
+      - product
+  /api/products/{id}:
+    get:
+      parameters:
+      - description: SPU ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.Spu'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 查询商品详情
+      tags:
+      - product
+  /api/seckill:
+    post:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 秒杀下单
+      tags:
+      - order
+  /api/user-coupons:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.UserCoupon'
+            type: array
+      summary: 获取我的优惠券
+      tags:
+      - promotion
+  /api/user-coupons/receive:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 领取参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.ReceiveCouponReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 领取优惠券
+      tags:
+      - promotion
 swagger: "2.0"

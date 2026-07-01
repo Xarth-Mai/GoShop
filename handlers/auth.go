@@ -28,6 +28,11 @@ type RefreshReq struct {
 }
 
 // SignKey 返回当前前端写操作签名所需的 HMAC key。
+// @Summary 获取请求签名 key
+// @Tags auth
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Router /api/auth/sign-key [get]
 func SignKey(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, gin.H{
@@ -37,6 +42,14 @@ func SignKey(c *gin.Context) {
 }
 
 // Register 注册接口
+// @Summary 用户注册
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param body body RegisterReq true "注册参数"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} map[string]interface{}
+// @Router /api/auth/register [post]
 func Register(c *gin.Context) {
 	var req RegisterReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -80,6 +93,14 @@ func Register(c *gin.Context) {
 }
 
 // Login 登录接口
+// @Summary 用户登录
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param body body LoginReq true "登录参数"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} map[string]interface{}
+// @Router /api/auth/login [post]
 func Login(c *gin.Context) {
 	var req LoginReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -128,6 +149,14 @@ func Login(c *gin.Context) {
 }
 
 // Refresh 无感刷新凭证
+// @Summary 刷新 access token
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param body body RefreshReq true "刷新参数"
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/auth/refresh [post]
 func Refresh(c *gin.Context) {
 	var req RefreshReq
 	if err := c.ShouldBindJSON(&req); err != nil {

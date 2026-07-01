@@ -25,6 +25,11 @@ type CartSyncReq struct {
 }
 
 // GetCart 获取当前用户的云端购物车
+// @Summary 获取购物车
+// @Tags cart
+// @Produce json
+// @Success 200 {array} map[string]interface{}
+// @Router /api/cart [get]
 func GetCart(c *gin.Context) {
 	userIDVal, exists := c.Get("userId")
 	if !exists {
@@ -77,6 +82,13 @@ func GetCart(c *gin.Context) {
 }
 
 // AddOrUpdateCart 添加或更新云端购物车数量
+// @Summary 添加或更新购物车
+// @Tags cart
+// @Accept json
+// @Produce json
+// @Param body body CartSaveReq true "购物车项"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/cart [post]
 func AddOrUpdateCart(c *gin.Context) {
 	userIDVal, exists := c.Get("userId")
 	if !exists {
@@ -133,6 +145,12 @@ func AddOrUpdateCart(c *gin.Context) {
 }
 
 // RemoveFromCart 移除购物车中某项
+// @Summary 删除购物车项
+// @Tags cart
+// @Produce json
+// @Param skuId path int true "SKU ID"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/cart/{skuId} [delete]
 func RemoveFromCart(c *gin.Context) {
 	userIDVal, exists := c.Get("userId")
 	if !exists {
@@ -158,6 +176,13 @@ func RemoveFromCart(c *gin.Context) {
 }
 
 // SyncCart 批量同步本地购物车至云端
+// @Summary 同步购物车
+// @Tags cart
+// @Accept json
+// @Produce json
+// @Param body body CartSyncReq true "同步项"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/cart/sync [post]
 func SyncCart(c *gin.Context) {
 	userIDVal, exists := c.Get("userId")
 	if !exists {

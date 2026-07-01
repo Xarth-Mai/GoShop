@@ -11,7 +11,7 @@ func TestCalculate(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	svc := NewService(db)
 
-	userID := uint(1) // models.SeedProducts 默认会生成 test_user (ID=1)
+	userID := uint(1)    // SeedServiceData 默认会生成 test_user (ID=1)
 	addressID := uint(1) // 默认生成的张小华地址 ID=1
 
 	// 准备一个便宜的 SKU 用于测试运费计算

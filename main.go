@@ -72,7 +72,7 @@ func main() {
 	} else {
 		core.Logger.Info("PostgreSQL 数据库主从集群连接成功，且 AutoMigrate 表结构迁移对齐完成.")
 		// 种子化测试数据
-		if err := models.SeedProducts(core.DB); err != nil {
+		if err := models.SeedServiceData(core.DB, ""); err != nil {
 			core.Logger.Error("数据库初始数据种子化失败", zap.Error(err))
 		} else {
 			core.Logger.Info("数据库初始卡券、地址、用户及商品数据对齐完成.")

@@ -15,6 +15,11 @@ type ReceiveCouponReq struct {
 }
 
 // GetCoupons 获取可领取的优惠券列表
+// @Summary 获取可领取优惠券
+// @Tags promotion
+// @Produce json
+// @Success 200 {array} models.Coupon
+// @Router /api/coupons [get]
 func GetCoupons(c *gin.Context) {
 	if core.DB == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "数据库未就绪"})
@@ -33,6 +38,11 @@ func GetCoupons(c *gin.Context) {
 }
 
 // GetUserCoupons 获取当前用户已拥有的可用卡券
+// @Summary 获取我的优惠券
+// @Tags promotion
+// @Produce json
+// @Success 200 {array} models.UserCoupon
+// @Router /api/user-coupons [get]
 func GetUserCoupons(c *gin.Context) {
 	userIDVal, exists := c.Get("userId")
 	if !exists {
@@ -62,6 +72,13 @@ func GetUserCoupons(c *gin.Context) {
 }
 
 // ReceiveCoupon 领取优惠券
+// @Summary 领取优惠券
+// @Tags promotion
+// @Accept json
+// @Produce json
+// @Param body body ReceiveCouponReq true "领取参数"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/user-coupons/receive [post]
 func ReceiveCoupon(c *gin.Context) {
 	userIDVal, exists := c.Get("userId")
 	if !exists {

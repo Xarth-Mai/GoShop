@@ -5,6 +5,7 @@ import ProductView from '../views/ProductView.vue'
 import CartView from '../views/CartView.vue'
 import CheckoutView from '../views/CheckoutView.vue'
 import LoginView from '../views/LoginView.vue'
+import RegisterView from '../views/RegisterView.vue'
 import OrderListView from '../views/OrderListView.vue'
 import OrderDetailView from '../views/OrderDetailView.vue'
 import { useAuthStore } from '../stores/auth'
@@ -54,6 +55,11 @@ const routes = [
     path: '/login',
     name: 'Login',
     component: LoginView
+  },
+  {
+    path: '/register',
+    name: 'Register',
+    component: RegisterView
   }
 ]
 
