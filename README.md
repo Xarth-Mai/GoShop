@@ -206,6 +206,17 @@ cp config.example.yaml config.yaml
 
 （在线演示版文档可访问：[https://shop.lzzz.ink/swagger/index.html](https://shop.lzzz.ink/swagger/index.html)）
 
+## ✅ 验证与后续测试交接
+
+当前核心回归命令：
+
+```bash
+GOCACHE=/tmp/goshop-go-build go test ./...
+cd web && npm run build
+```
+
+非核心的扩展测试、微服务冒烟、前端 E2E 和 Swagger QA 已整理为可交给其他 agent 的任务提示词，见 [docs/agent_test_prompts.md](docs/agent_test_prompts.md)。
+
 ---
 
 ## 📂 目录结构简析

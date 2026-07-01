@@ -35,7 +35,7 @@ Each service supports configuration overrides via environment variables.
 
 3. **Background Worker Concentration**:
    - Unlike the monolith mode where background tasks start implicitly inside `main.go`, in the microservice transition mode, HTTP services (ports `8101` ~ `8108`) remain completely stateless.
-   - The `goshop-scheduler-service` (port `8109`) is the single host for background processes. Upon startup, it spawns the transactional Outbox Event Publisher (`outbox.NewPublisher`) to publish events to NATS JetStream subjects such as `goshop.events.payment.paymentsucceeded`, and the Reliable Delay Queue Worker (`StartReliableDelayQueueWorker`) to handle ticket timeouts and stock rollbacks.
+   - The `goshop-scheduler-service` (port `8109`) is the single host for background processes. Upon startup, it spawns the transactional Outbox Event Publisher (`outbox.NewPublisher`) to publish events to NATS JetStream subjects such as `goshop.events.payment.paymentsucceeded`, and the Reliable Delay Queue Worker (`StartReliableDelayQueueWorker`) to claim timeout jobs from Valkey and call the order service over `/api/internal/orders/:id/cancel-pending`.
 
 ### Port and Configuration Overrides
 
@@ -100,14 +100,42 @@ All internal requests require a secure verification header:
 
 - `X-Internal-Token`: `goshop_internal_communication_secret_token`
 
-### 1. Product Service (:8102)
+The Go implementation also contains local SQLite/GORM fallback handlers in `core.CallInternalService` so monolith mode and unit tests can run without launching all service processes.
+
+### 1. User Service (:8101)
+
+#### GET `/api/internal/addresses/:id/snapshot?userId=:userId`
+
+- **Description**: Fetch an address snapshot for checkout/order creation.
+- **Response**:
+
+  ```json
+  {
+    "id": 1,
+    "userId": 1,
+    "receiverName": "张小华",
+    "receiverPhone": "13800138000",
+    "province": "北京市",
+    "city": "北京市",
+    "district": "朝阳区",
+    "detailAddress": "科创大厦 10 层 1001 室",
+    "fullAddress": "北京市北京市朝阳区科创大厦 10 层 1001 室"
+  }
+  ```
+
+### 2. Product Service (:8102)
 
 #### GET `/api/internal/products/:id`
 
 - **Description**: Fetch Sku detail information by Sku ID.
 - **Response**: Sku JSON object.
 
-### 2. Inventory Service (:8103)
+#### GET `/api/internal/products/:id/cart-summary`
+
+- **Description**: Fetch the product summary used by cart and order list displays.
+- **Response**: `{ "skuId": 1, "spuId": 1, "spuName": "...", "skuName": "...", "price": 39900, "image": "..." }`
+
+### 3. Inventory Service (:8103)
 
 #### POST `/api/internal/inventory/reserve`
 
@@ -132,7 +160,18 @@ All internal requests require a secure verification header:
 - **Payload**: `{ "orderId": "GS-1700000-01" }`
 - **Response**: `{ "status": "success" }`
 
-### 3. Promotion/Coupon Service (:8104)
+#### POST `/api/internal/inventory/restock`
+
+- **Description**: Restock sold inventory by SKU/quantity after approved aftersale.
+- **Payload**: `{ "orderId": "GS-1700000-01", "items": [{ "skuId": 1, "quantity": 1 }] }`
+- **Response**: `{ "status": "success" }`
+
+#### GET `/api/internal/inventory/reservations/:orderId`
+
+- **Description**: Fetch reservation rows for order detail aggregation.
+- **Response**: Array of `InventoryReservation`.
+
+### 4. Promotion/Coupon Service (:8104)
 
 #### POST `/api/internal/promotion/candidates`
 
@@ -178,6 +217,99 @@ All internal requests require a secure verification header:
   ```
 
 - **Response**: `{ "status": "success" }`
+
+### 5. Order Service (:8105)
+
+#### POST `/api/internal/orders/seckill-create`
+
+- **Description**: Create the order record for a seckill request after inventory service succeeds in Valkey pre-deduct.
+- **Payload**:
+
+  ```json
+  {
+    "orderId": "SK-1700000-01",
+    "userId": 1,
+    "skuId": 1,
+    "price": 39900,
+    "quantity": 1,
+    "payExpireAt": "2026-07-01T12:00:15Z"
+  }
+  ```
+
+#### GET `/api/internal/orders/:id/payment-source?userId=:userId`
+
+- **Description**: Fetch order amount/status data needed by payment service to create or settle payment orders.
+
+#### GET `/api/internal/orders/:id/refund-source?userId=:userId`
+
+- **Description**: Fetch order/item refundable amount and quantity data used by aftersale service.
+
+#### POST `/api/internal/orders/:id/cancel-pending`
+
+- **Description**: Idempotently cancel a pending payment order and release inventory/coupon through downstream services.
+- **Payload**: `{ "reason": "支付超时自动取消并释放库存" }`
+- **Response**: `{ "orderId": "GS-...", "status": 60, "canceled": true }`
+
+#### GET `/api/internal/orders/expired-pending?limit=100`
+
+- **Description**: Return expired pending order IDs for scheduler DB fallback scans.
+
+#### POST `/api/internal/orders/:id/refund-apply`
+
+- **Description**: Mark an order as refund-applying after aftersale service accepts an application.
+
+#### POST `/api/internal/orders/:id/refund-complete`
+
+- **Description**: Update refunded amounts and final order pay/refund status after aftersale approval.
+
+#### POST `/api/internal/orders/:id/refund-reject`
+
+- **Description**: Mark an order refund request as rejected.
+
+### 6. Payment Service (:8106)
+
+#### GET `/api/internal/payments/by-order/:orderId`
+
+- **Description**: Fetch latest payment order for order detail aggregation.
+- **Response**: `PaymentOrder` JSON object, or 404 if not created.
+
+### 7. AfterSale Service (:8107)
+
+#### GET `/api/internal/aftersales/by-order/:orderId`
+
+- **Description**: Fetch aftersale orders and refund orders for order detail aggregation.
+- **Response**:
+
+  ```json
+  {
+    "afterSales": [],
+    "refundOrders": []
+  }
+  ```
+
+### 8. Cart Service (:8108)
+
+#### POST `/api/internal/cart/clear-items`
+
+- **Description**: Remove purchased SKU rows from the user's cart after order creation.
+- **Payload**: `{ "userId": 1, "skuIds": [1, 2] }`
+- **Response**: `{ "status": "success" }`
+
+## Seed Data And Local Compatibility
+
+Service startup uses `models.SeedServiceData(db, serviceName)` instead of the old all-in-one seed. This keeps physical database ownership intact:
+
+- `goshop-user-service`: `users`, `addresses`, `test_user` with password `123456`
+- `goshop-product-service`: categories, SPUs, SKUs
+- `goshop-inventory-service`: SKU inventory rows derived from catalog seed data
+- `goshop-promotion-service`: coupons and demo user coupons
+- monolith mode (`serviceName == ""`): all demo data for local compatibility
+
+Swagger is generated from handler annotations with:
+
+```bash
+GOCACHE=/tmp/goshop-go-build go run github.com/swaggo/swag/cmd/swag init -g main.go -o docs
+```
 
 ---
 
