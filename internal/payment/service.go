@@ -27,6 +27,14 @@ type PayResult struct {
 	OrderID        string
 }
 
+type CreatePaymentResult struct {
+	PaymentOrderID string     `json:"paymentOrderId"`
+	OrderID        string     `json:"orderId"`
+	Amount         int        `json:"amount"`
+	Status         int        `json:"status"`
+	PayExpireAt    *time.Time `json:"payExpireAt,omitempty"`
+}
+
 type Service struct {
 	DB        *gorm.DB
 	Inventory inventory.Service
@@ -38,6 +46,41 @@ func NewService(db *gorm.DB) Service {
 
 func PaymentOrderID(orderID string) string {
 	return "PAY-" + orderID
+}
+
+func (s Service) CreateOrGetPaymentOrder(userID uint, orderID string) (CreatePaymentResult, error) {
+	var result CreatePaymentResult
+	err := s.DB.Transaction(func(tx *gorm.DB) error {
+		var order models.Order
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&order, "id = ? AND user_id = ?", orderID, userID).Error; err != nil {
+			return err
+		}
+		if order.Status != models.OrderStatusPendingPayment && order.Status != models.OrderStatusPaid {
+			return fmt.Errorf("当前订单状态不可创建支付单")
+		}
+
+		payment, err := CreateMockPaymentOrder(tx, order)
+		if err != nil {
+			return err
+		}
+		result = CreatePaymentResult{
+			PaymentOrderID: payment.ID,
+			OrderID:        payment.OrderID,
+			Amount:         payment.Amount,
+			Status:         payment.Status,
+			PayExpireAt:    order.PayExpireAt,
+		}
+		return nil
+	})
+	return result, err
+}
+
+func (s Service) GetPaymentOrder(userID uint, paymentOrderID string) (models.PaymentOrder, error) {
+	var payment models.PaymentOrder
+	err := s.DB.Joins("JOIN orders ON orders.id = payment_orders.order_id").
+		Where("payment_orders.id = ? AND orders.user_id = ?", paymentOrderID, userID).
+		First(&payment).Error
+	return payment, err
 }
 
 func (s Service) PayMockOrder(userID uint, orderID string) (PayResult, error) {

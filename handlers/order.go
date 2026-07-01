@@ -37,6 +37,10 @@ type PayReq struct {
 	OrderID string `json:"orderId" binding:"required"`
 }
 
+type CreatePaymentReq struct {
+	OrderID string `json:"orderId" binding:"required"`
+}
+
 type MockPaymentCallbackReq struct {
 	PaymentOrderID string `json:"paymentOrderId"`
 	OrderID        string `json:"orderId"`
@@ -196,6 +200,63 @@ func PreviewCheckout(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, preview)
+}
+
+// CreatePayment 创建或幂等返回当前用户订单的支付单
+func CreatePayment(c *gin.Context) {
+	userIDVal, exists := c.Get("userId")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "未登录"})
+		return
+	}
+	userID := userIDVal.(uint)
+
+	var req CreatePaymentReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "参数错误"})
+		return
+	}
+	if core.DB == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "数据库未就绪"})
+		return
+	}
+
+	result, err := paymentsvc.NewService(core.DB).CreateOrGetPaymentOrder(userID, req.OrderID)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"message": "订单不存在"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// GetPayment 查询当前用户可访问的支付单
+func GetPayment(c *gin.Context) {
+	userIDVal, exists := c.Get("userId")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "未登录"})
+		return
+	}
+	userID := userIDVal.(uint)
+
+	if core.DB == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "数据库未就绪"})
+		return
+	}
+
+	payment, err := paymentsvc.NewService(core.ReplicaDB).GetPaymentOrder(userID, c.Param("id"))
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"message": "支付单不存在"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "查询支付单失败: " + err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, payment)
 }
 
 // PayOrder 支付订单接口

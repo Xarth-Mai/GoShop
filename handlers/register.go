@@ -57,6 +57,8 @@ func RegisterRoutes(r *gin.Engine) {
 
 			// 高并发秒杀及支付确认
 			protected.POST("/seckill", Seckill)
+			protected.POST("/payments", CreatePayment)
+			protected.GET("/payments/:id", GetPayment)
 			protected.POST("/pay", PayOrder)
 
 			// 商家售后退款审核

@@ -59,6 +59,14 @@ const handlePay = async () => {
   if (!order.value) return
   isPaying.value = true
   try {
+    const paymentRes = await signedFetch('/api/payments', {
+      method: 'POST',
+      body: JSON.stringify({ orderId: order.value.id })
+    })
+    if (!paymentRes.ok) {
+      await fetchDetail()
+      return
+    }
     const res = await signedFetch('/api/pay', {
       method: 'POST',
       body: JSON.stringify({ orderId: order.value.id })
@@ -159,6 +167,7 @@ onUnmounted(() => {
           <h3 class="section-title">支付与库存</h3>
           <div class="summary-row"><span>支付单</span><span>{{ paymentOrder?.id || '未创建' }}</span></div>
           <div class="summary-row"><span>支付状态</span><span>{{ paymentOrder?.status || '-' }}</span></div>
+          <div class="summary-row"><span>渠道流水</span><span>{{ paymentOrder?.channelTradeNo || '-' }}</span></div>
           <div class="summary-row"><span>库存预占</span><span>{{ reservations.length }} 条</span></div>
         </Card>
 
